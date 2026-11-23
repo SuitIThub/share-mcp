@@ -40,7 +40,7 @@ Neuen Code für ein weiteres Gerät: `POST /v1/pair/codes` → `{"code":"…","e
 ## Ereignisse (WebSocket `GET /v1/events`)
 
 Server → Client, Textnachrichten `{"type": "...", "data": {...}}`. Clientnachrichten werden ignoriert. Server pingt alle 30 s.
-Nach jedem (Wieder-)Verbinden: `GET /v1/transfers?role=incoming|outgoing` neu laden (Ereignisse während der Trennung gehen verloren).
+Nach jedem (Wieder-)Verbinden: `GET /v1/transfers?role=incoming|outgoing` neu laden (Ereignisse während der Trennung gehen verloren). Sender schließen dabei jedes eigene Angebot, das nicht mehr in `outgoing` steht, so als wäre `transfer.closed` gekommen.
 
 | type | an | data |
 |---|---|---|
@@ -102,9 +102,9 @@ Angebotsende: gezielt, sobald alle Zustellungen final sind; an alle erst nach `e
    `409` abgelaufen/abgebrochen. Erneutes Annehmen eines bereits angenommenen Angebots liefert dieselbe Antwort (zum Fortsetzen nach Neustart, auch nach Ablauf).
    Ablehnen: `POST /v1/transfers/{id}/decline` → 204 (nur aus `waiting`, sonst 409).
 3. **Wegwahl** je Datei: alle `lan_candidates` parallel `GET https://<c>/t/{id}/ping` mit Token und **gepinntem Fingerabdruck** (Zertifikatskette nicht prüfen, nur Fingerabdruck des Leaf-Zertifikats), Zeitgrenze 1,5 s. Erste 204 gewinnt → `lan`. Sonst `relay`.
-4. Download in `<name>.<tid8>-<n>.part`, fortsetzen mit `Range: bytes=<partgröße>-`. Bei Abbruch neu wählen (Weg darf wechseln). Nach 5 Fehlversuchen ohne Fortschritt: `POST /v1/transfers/{id}/fail`.
+4. Download in `<name>.<tid8>-<n>.part`, fortsetzen mit `Range: bytes=<partgröße>-`. Bei Abbruch neu wählen (Weg darf wechseln) und mit wachsender Pause (1 s … 16 s) **so lange wiederholen, wie die eigene Zustellung laut `GET /v1/transfers/{id}` noch nicht final und das Angebot offen ist** – auch ein `502 sender offline` ist kein Grund aufzugeben (der Sender kann sich innerhalb von 30 s wieder verbinden). Der Server beendet hoffnungslose Fälle selbst (`cancelled`, oder `failed` 2 Min nach Ablauf ohne Fortschritt). `POST /v1/transfers/{id}/fail` nur bei endgültigen Fehlern: Datei beim Sender geändert (409), lokaler Schreibfehler.
 5. Fortschritt höchstens 1×/s: `POST /v1/transfers/{id}/progress {"bytes": <gesamt>, "path": "lan"|"relay"}`.
-6. Fertig, wenn Teildatei = `size` → umbenennen: Basisname bereinigt (Pfadanteile weg, `<>:"|?*` und Steuerzeichen → `_`, Leerzeichen/Punkte am Ende weg, reservierte Windows-Namen `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9` mit `_` davor, leer → `file`), bei Konflikt ` (1)`, ` (2)` … vor der Endung.
+6. Fertig, wenn Teildatei = `size` → umbenennen: Basisname bereinigt (Pfadanteile weg, `<>:"|?*` und Steuerzeichen → `_`, Leerzeichen/Punkte am Ende weg, reservierte Windows-Namen `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9` mit `_` davor, leer → `file`), bei Konflikt ` (1)`, ` (2)` … vor der Endung. Atomar ablegen: Zielnamen exklusiv anlegen (O_EXCL bzw. `createNewFile`), dann die Teildatei darüber umbenennen – so überschreiben sich zwei gleichnamige Downloads nie.
 7. Nach allen Dateien: `POST /v1/transfers/{id}/delivered`.
 
 ## Relay

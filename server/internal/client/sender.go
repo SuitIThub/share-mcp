@@ -58,6 +58,9 @@ type Sender struct {
 	updates  chan Update
 	ready    chan struct{}
 	readyOne sync.Once
+
+	pending      int    // file offers between endpoint start and registration
+	beforeCreate func() // test hook: runs between endpoint start and offer registration
 }
 
 func NewSender(api *API, opts SenderOptions) *Sender {
@@ -85,10 +88,15 @@ func (s *Sender) WaitReady(ctx context.Context, d time.Duration) error {
 // Run processes server events until ctx is done. Offers end when Run ends.
 func (s *Sender) Run(ctx context.Context) error {
 	defer s.stopEndpoint()
+	connects := 0
 	for ev := range s.api.Events(ctx) {
 		switch ev.Type {
 		case EvConnected:
+			connects++
 			s.readyOne.Do(func() { close(s.ready) })
+			if connects > 1 {
+				go s.resync(ctx)
+			}
 		case protocol.EvRelayRequest:
 			var rr protocol.RelayRequest
 			if json.Unmarshal(ev.Data, &rr) == nil {
@@ -108,6 +116,30 @@ func (s *Sender) Run(ctx context.Context) error {
 		}
 	}
 	return ctx.Err()
+}
+
+// resync recovers events missed while disconnected: offers the server no longer lists as
+// open are closed locally; current deliveries of open offers are re-emitted.
+func (s *Sender) resync(ctx context.Context) {
+	out, err := s.api.Outgoing(ctx)
+	if err != nil {
+		return
+	}
+	open := map[string]protocol.Transfer{}
+	for _, t := range out {
+		open[t.ID] = t
+	}
+	for _, id := range s.Active() {
+		t, ok := open[id]
+		if !ok {
+			s.remove(id)
+			s.emit(Update{TransferID: id, Closed: true})
+			continue
+		}
+		for _, d := range t.Deliveries {
+			s.emit(Update{TransferID: id, Delivery: d})
+		}
+	}
 }
 
 func (s *Sender) emit(u Update) {
@@ -142,7 +174,7 @@ func (s *Sender) lookup(id string) *offer {
 func (s *Sender) remove(id string) {
 	s.mu.Lock()
 	delete(s.offers, id)
-	idle := true
+	idle := s.pending == 0
 	for _, o := range s.offers {
 		if o.transfer.Kind == protocol.KindFiles {
 			idle = false
@@ -189,15 +221,26 @@ func (s *Sender) OfferFiles(ctx context.Context, paths []string, targets []strin
 		stats = append(stats, st)
 		items = append(items, protocol.FileItem{Name: st.Name(), Size: st.Size(), MIME: mimeOf(st.Name()), ModTime: st.ModTime()})
 	}
+	s.mu.Lock()
+	s.pending++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.pending--
+		s.mu.Unlock()
+		s.remove("") // stops the endpoint only if nothing uses it any more
+	}()
 	var cands []string
 	if port, err := s.ensureEndpoint(); err == nil {
 		cands = s.opts.Candidates(port)
+	}
+	if s.beforeCreate != nil {
+		s.beforeCreate()
 	}
 	req := protocol.CreateTransferRequest{Kind: protocol.KindFiles, Files: items, Targets: targets, Broadcast: broadcast,
 		Message: message, Minutes: minutes, LANCandidates: cands}
 	resp, err := s.api.CreateTransfer(ctx, req)
 	if err != nil {
-		s.remove("") // stop endpoint if idle
 		return protocol.Transfer{}, err
 	}
 	secret, _ := hex.DecodeString(resp.Secret)

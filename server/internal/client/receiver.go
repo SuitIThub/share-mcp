@@ -21,11 +21,11 @@ type Receiver struct {
 	dir          string
 	probeTimeout time.Duration
 	idleTimeout  time.Duration
-	maxFailures  int
+	backoffBase  time.Duration
 }
 
 func NewReceiver(api *API, downloadDir string) *Receiver {
-	return &Receiver{api: api, dir: downloadDir, probeTimeout: 1500 * time.Millisecond, idleTimeout: 30 * time.Second, maxFailures: 5}
+	return &Receiver{api: api, dir: downloadDir, probeTimeout: 1500 * time.Millisecond, idleTimeout: 30 * time.Second, backoffBase: time.Second}
 }
 
 func (r *Receiver) SetProbeTimeout(d time.Duration) { r.probeTimeout = d }
@@ -78,8 +78,12 @@ func (r *Receiver) Accept(ctx context.Context, t protocol.Transfer, progress fun
 			}
 			return out, err
 		}
-		_, final := r.destPaths(t.ID, n, f.Name)
-		if err := os.Rename(part, final); err != nil {
+		final, err := claimPath(r.dir, SafeFileName(f.Name))
+		if err != nil {
+			return out, err
+		}
+		if err := os.Rename(part, final); err != nil { // replaces only our own placeholder
+			os.Remove(final)
 			return out, err
 		}
 		out = append(out, final)
@@ -139,8 +143,7 @@ func partSize(path string) int64 {
 
 func (r *Receiver) downloadFile(ctx context.Context, t protocol.Transfer, ar protocol.AcceptResponse, n int, part string, before int64, rep *reporter) error {
 	size := t.Files[n].Size
-	failures := 0
-	backoff := time.Second
+	backoff := r.backoffBase
 	for {
 		have := partSize(part)
 		if have > size { // corrupt leftover
@@ -170,19 +173,43 @@ func (r *Receiver) downloadFile(ctx context.Context, t protocol.Transfer, ar pro
 			return fe.err
 		}
 		if partSize(part) > have {
-			failures, backoff = 0, time.Second
+			backoff = r.backoffBase
 		}
-		failures++
-		if failures >= r.maxFailures {
-			return fmt.Errorf("download failed after %d attempts: %w", failures, err)
+		// keep retrying as long as the server still considers our delivery alive;
+		// it ends it (cancelled, failed after the stall timeout, ...) when it is hopeless
+		if alive, aerr := r.deliveryAlive(ctx, t.ID); !alive {
+			return fatalError{fmt.Errorf("offer ended: %v (last error: %w)", aerr, err)}
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(backoff):
 		}
-		backoff *= 2
+		if backoff < 16*r.backoffBase {
+			backoff *= 2
+		}
 	}
+}
+
+// deliveryAlive reports whether our delivery may still continue. Network errors count as alive.
+func (r *Receiver) deliveryAlive(ctx context.Context, id string) (bool, error) {
+	tr, err := r.api.Transfer(ctx, id)
+	if err != nil {
+		var ae *APIError
+		if errors.As(err, &ae) && ae.Status == 404 {
+			return false, err
+		}
+		return true, nil
+	}
+	if tr.Closed {
+		return false, errors.New("offer closed")
+	}
+	for _, d := range tr.Deliveries {
+		if d.Status.Final() {
+			return false, fmt.Errorf("delivery %s", d.Status)
+		}
+	}
+	return true, nil
 }
 
 // choosePath probes all LAN candidates in parallel; the first answering one wins, otherwise relay.

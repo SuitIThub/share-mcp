@@ -100,6 +100,23 @@ func SafeFileName(name string) string {
 	return name
 }
 
+// claimPath atomically reserves a free final path (creating an empty placeholder with O_EXCL)
+// so concurrent downloads with the same name cannot overwrite each other.
+func claimPath(dir, name string) (string, error) {
+	for i := 0; i < 1000; i++ {
+		p := UniquePath(dir, name)
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		if err == nil {
+			f.Close()
+			return p, nil
+		}
+		if !os.IsExist(err) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free file name for %q", name)
+}
+
 // UniquePath returns dir/name, or dir/"name (n).ext" if it exists.
 func UniquePath(dir, name string) string {
 	p := filepath.Join(dir, name)

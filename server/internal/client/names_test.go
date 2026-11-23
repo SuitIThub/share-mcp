@@ -60,3 +60,16 @@ func TestUniquePath(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+
+// Final review #10: claiming a final path reserves it, so a parallel download cannot overwrite it.
+func TestClaimPathReserves(t *testing.T) {
+	dir := t.TempDir()
+	a, err := claimPath(dir, "a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := claimPath(dir, "a.txt")
+	if err != nil || a == b || filepath.Base(b) != "a (1).txt" {
+		t.Fatal(a, b, err)
+	}
+}

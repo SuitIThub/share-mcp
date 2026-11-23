@@ -237,8 +237,9 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request, d protocol
 }
 
 // cancelTransfer marks open deliveries cancelled and closes the transfer. Caller holds s.mu.
-func (s *Server) cancelTransfer(t protocol.Transfer) {
-	if t.Closed {
+func (s *Server) cancelTransfer(stale protocol.Transfer) {
+	t, err := s.st.Transfer(stale.ID) // re-read under s.mu: the snapshot may be outdated
+	if err != nil || t.Closed {
 		return
 	}
 	now := s.cfg.Now()
@@ -474,6 +475,9 @@ func (s *Server) tick(ctx context.Context) {
 }
 
 func (s *Server) senderGone(id string, now time.Time) bool {
+	if s.hub.Online(id) {
+		return false
+	}
 	s.off.mu.Lock()
 	defer s.off.mu.Unlock()
 	since, ok := s.off.since[id]

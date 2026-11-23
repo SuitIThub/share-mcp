@@ -422,3 +422,38 @@ func TestReceiverViewHidesOtherDeliveries(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+// Final review #3: a connected sender must never count as gone.
+func TestConnectedSenderNeverGone(t *testing.T) {
+	e := newTestServer(t)
+	sid, stok := e.pair(t, "Desk", protocol.DeviceWindows)
+	rid, _ := e.pair(t, "Pixel", protocol.DeviceAndroid)
+	e.ws(t, stok)
+	eventually(t, 2*time.Second, func() bool { return e.srv.hub.Online(sid) })
+	resp := e.create(t, stok, fileReq("Pixel"))
+	e.srv.off.mu.Lock()
+	e.srv.off.since[sid] = e.clock.Now().Add(-time.Hour) // stale entry from a callback race
+	e.srv.off.mu.Unlock()
+	e.srv.tick(context.Background())
+	if d := delivery(t, e, resp.Transfer.ID, rid); d.Status != protocol.StatusWaiting {
+		t.Fatal(d)
+	}
+}
+
+// Final review #4: cancelling with a stale snapshot must not overwrite a finished delivery.
+func TestCancelDoesNotOverwriteDelivered(t *testing.T) {
+	e := newTestServer(t)
+	_, stok := e.pair(t, "Desk", protocol.DeviceWindows)
+	rid, rtok := e.pair(t, "Pixel", protocol.DeviceAndroid)
+	e.ws(t, stok)
+	resp := e.create(t, stok, fileReq("Pixel"))
+	stale, _ := e.st.Transfer(resp.Transfer.ID)
+	e.do(t, rtok, "POST", "/v1/transfers/"+resp.Transfer.ID+"/accept", nil, nil)
+	e.do(t, rtok, "POST", "/v1/transfers/"+resp.Transfer.ID+"/delivered", nil, nil)
+	e.srv.mu.Lock()
+	e.srv.cancelTransfer(stale)
+	e.srv.mu.Unlock()
+	if d := delivery(t, e, resp.Transfer.ID, rid); d.Status != protocol.StatusDelivered {
+		t.Fatal(d)
+	}
+}
