@@ -479,3 +479,6 @@ func (s *Server) senderGone(id string, now time.Time) bool {
 	since, ok := s.off.since[id]
 	return ok && now.Sub(since) > s.cfg.SenderGrace
 }
+
+// Tick runs one background pass immediately (used by tests and tools).
+func (s *Server) Tick(ctx context.Context) { s.tick(ctx) }

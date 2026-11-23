@@ -378,3 +378,6 @@ func (s *Sender) serveRelay(ctx context.Context, rr protocol.RelayRequest) {
 	}
 	s.api.RelayUpload(ctx, rr.RelayID, f)
 }
+
+// API returns the sender's API client.
+func (s *Sender) API() *API { return s.api }
