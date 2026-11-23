@@ -1,0 +1,7 @@
+*.exe
+/server/bin/
+*.db
+*.db-*
+.remember/
+.superpowers/
+
