@@ -11,7 +11,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"share/internal/client"
+	"share/internal/mcpserver"
 	"share/internal/protocol"
 )
 
@@ -231,6 +234,18 @@ func (c *cli) send(ctx context.Context, kind protocol.Kind, args []string) int {
 	}
 }
 
+// mcp serves the MCP tools on stdio. stdout belongs to the protocol: never print to it here.
 func (c *cli) mcp(ctx context.Context) int {
-	return c.fail(1, "mcp not available yet")
+	api, err := c.loadAPI()
+	if err != nil {
+		return c.fail(1, "%v", err)
+	}
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	sender := client.NewSender(api, client.SenderOptions{})
+	go sender.Run(ctx)
+	if err := mcpserver.New(api, sender).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+		return c.fail(1, "mcp: %v", err)
+	}
+	return 0
 }
