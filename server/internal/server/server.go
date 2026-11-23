@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"share/internal/protocol"
@@ -29,6 +30,8 @@ type Server struct {
 	mux    *http.ServeMux
 	hub    *hub
 	relays *relayBroker
+	off    *offlineTracker
+	mu     sync.Mutex // serializes delivery state transitions
 	ctx    context.Context
 	cancel context.CancelFunc
 }
