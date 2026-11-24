@@ -4,7 +4,6 @@
 *.db-*
 .remember/
 .superpowers/
-
 android/.gradle/
 android/.kotlin/
 android/**/build/
