@@ -1,7 +1,9 @@
 package de.suitithub.share.core
 
 import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
+import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.nio.channels.Channels
 import java.time.Instant
@@ -42,4 +44,39 @@ class SlowSource(private val inner: FileSource, private val chunk: Int, private 
             override fun close() = input.close()
         }
     }
+}
+
+/** Downloads into a directory; parts and markers live in dir/.parts. */
+class DirStore(private val dir: File) : DownloadStore {
+    private val parts = File(dir, ".parts").apply { mkdirs() }
+
+    override fun part(transferId: String, index: Int, item: FileItem) = object : Part {
+        private val part = File(parts, "$transferId-$index.part")
+        private val marker = File(parts, "$transferId-$index.done")
+        override val finishedRef get() = marker.takeIf { it.exists() }?.readText()
+        override fun size() = part.length()
+        override fun append(): OutputStream = FileOutputStream(part, true)
+        override fun reset() {
+            part.delete()
+        }
+
+        override fun finish(): String {
+            part.createNewFile()
+            val target = File(dir, uniqueName(safeFileName(item.name)) { File(dir, it).exists() })
+            check(part.renameTo(target))
+            marker.writeText(target.path)
+            return target.path
+        }
+    }
+
+    override fun forget(transferId: String) {
+        parts.listFiles()!!.filter { it.name.startsWith("$transferId-") }.forEach { it.delete() }
+    }
+
+    override fun retain(transferIds: Set<String>) {
+        parts.listFiles()!!.filter { it.name.substringBeforeLast('-') !in transferIds }.forEach { it.delete() }
+    }
+
+    fun leftovers() = parts.listFiles()!!.map { it.name }
+    fun files() = dir.listFiles()!!.filter { it.isFile }.map { it.name }.sorted()
 }

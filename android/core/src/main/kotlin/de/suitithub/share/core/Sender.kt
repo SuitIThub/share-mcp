@@ -225,6 +225,9 @@ class Sender(
         if (pendingFiles == 0 && own.values.none { it.transfer.kind == Kind.FILES }) endpoint.close()
     }
 
+    /** Simulates losing the local path (tests). */
+    internal fun stopEndpointForTest() = endpoint.close()
+
     /** Ends all offers locally. */
     fun close() {
         val ids = synchronized(lock) {

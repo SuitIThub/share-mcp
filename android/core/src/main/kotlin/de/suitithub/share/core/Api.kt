@@ -21,6 +21,9 @@ import java.io.InputStream
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.toJavaDuration
 
 /** A paired device. */
 data class Account(val serverUrl: String, val deviceId: String, val token: String, val name: String, val identity: Identity) {
@@ -83,10 +86,10 @@ class Api(val account: Account, baseClient: OkHttpClient = OkHttpClient()) {
     suspend fun delivered(id: String) = http.unit("POST", "/v1/transfers/$id/delivered")
     suspend fun fail(id: String) = http.unit("POST", "/v1/transfers/$id/fail")
 
-    internal fun relayCall(id: String, n: Int, offset: Long): Call {
+    internal fun relayCall(id: String, n: Int, offset: Long, readTimeout: Duration = 30.seconds): Call {
         val r = http.request("/v1/transfers/$id/files/$n")
         if (offset > 0) r.header("Range", "bytes=$offset-")
-        return http.streaming.newCall(r.build())
+        return http.streaming.newBuilder().readTimeout(readTimeout.toJavaDuration()).build().newCall(r.build())
     }
 
     /** Opens the relay stream of file n from offset; the caller closes the response. */
