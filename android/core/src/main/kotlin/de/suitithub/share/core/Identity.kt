@@ -19,15 +19,18 @@ class Identity private constructor(private val held: HeldCertificate) {
     val keyPem: String = held.privateKeyPkcs8Pem()
     val fingerprint: String = fingerprint(held.certificate)
 
-    fun serverSocketFactory(): SSLServerSocketFactory {
+    private val context: SSLContext by lazy {
         val pw = CharArray(0)
         val ks = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
             load(null, null)
             setKeyEntry("device", held.keyPair.private, pw, arrayOf(held.certificate))
         }
         val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(ks, pw) }
-        return SSLContext.getInstance("TLS").apply { init(kmf.keyManagers, null, SecureRandom()) }.serverSocketFactory
+        SSLContext.getInstance("TLS").apply { init(kmf.keyManagers, null, SecureRandom()) }
     }
+
+    fun sslContext(): SSLContext = context
+    fun serverSocketFactory(): SSLServerSocketFactory = context.serverSocketFactory
 
     companion object {
         fun generate(name: String): Identity {
