@@ -69,4 +69,9 @@
     <string name="install">Installieren</string>
     <string name="close">Schließen</string>
     <string name="cannot_open">Keine App zum Öffnen gefunden. Die Datei liegt im Download-Ordner.</string>
+    <string name="nothing_to_share">Hier gibt es nichts zu senden</string>
+    <string name="share_rejected">Dieser Inhalt kann nicht gesendet werden</string>
+    <string name="pair_first">Dieses Gerät muss zuerst gekoppelt werden. Öffne dazu die App.</string>
+    <string name="send_one_file">1 Datei senden</string>
+    <string name="send_files">%1$d Dateien senden</string>
 </resources>
