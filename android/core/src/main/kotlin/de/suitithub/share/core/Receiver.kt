@@ -62,8 +62,8 @@ class Receiver(
                     reporting.cancel()
                 }
             }
-            reportDelivered(t.id, reporter)
-            store.forget(t.id)
+            // without the server's answer the finished markers stay, so a later call only reports
+            if (reportDelivered(t.id, reporter)) store.forget(t.id)
             refs
         } catch (e: OfferEndedException) {
             store.forget(t.id)
@@ -105,19 +105,21 @@ class Receiver(
     }
 
     /** Best effort: the files are complete, whatever the server says. */
-    private suspend fun reportDelivered(id: String, reporter: Reporter) {
+    private suspend fun reportDelivered(id: String, reporter: Reporter): Boolean {
         withTimeoutOrNull(2.seconds) { reporter.reportPath() }
         var pause = backoffBase
         repeat(5) {
             try {
-                return api.delivered(id)
+                api.delivered(id)
+                return true
             } catch (e: IOException) {
                 val status = (e as? ApiException)?.status
-                if (status != null && status < 500) return
+                if (status != null && status < 500) return true
                 delay(pause)
                 pause *= 2
             }
         }
+        return false
     }
 
     /** Pauses between attempts; gives up when nothing has moved for long after the offer expired. */
