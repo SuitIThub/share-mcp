@@ -286,6 +286,9 @@ class Engine(
         return t
     }
 
+    /** The server withdrew an offer (reported by push). */
+    fun forgetOffer(id: String) = take(id)
+
     suspend fun offerFiles(
         sources: List<FileSource>,
         targets: List<String>,

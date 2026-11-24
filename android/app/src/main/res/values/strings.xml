@@ -20,4 +20,6 @@
     <string name="server_refused">Server lehnt ab: %1$s</string>
     <string name="send_failed">Senden fehlgeschlagen</string>
     <string name="open_app_to_continue">Share öffnen, um die Übertragung fortzusetzen</string>
+    <string name="new_offer">Neues Angebot</string>
+    <string name="open_app">Share öffnen, um es anzusehen</string>
 </resources>

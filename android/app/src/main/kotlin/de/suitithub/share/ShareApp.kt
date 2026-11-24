@@ -16,7 +16,9 @@ import de.suitithub.share.data.ContentSource
 import de.suitithub.share.data.MediaStoreDownloads
 import de.suitithub.share.data.SecureStore
 import de.suitithub.share.service.Notifications
+import de.suitithub.share.service.PushHandler
 import de.suitithub.share.service.TransferService
+import de.suitithub.share.service.pushAvailable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +28,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -77,6 +81,7 @@ class ShareApp : Application() {
                 before = now
             }
         }
+        launch { syncPushToken(e) }
         launch {
             e.hasWork.collect { work ->
                 if (work) try {
@@ -86,6 +91,14 @@ class ShareApp : Application() {
                 }
             }
         }
+    }
+
+    /** Reports the push token once per engine: now, or as soon as there is a connection. */
+    private suspend fun syncPushToken(e: Engine) {
+        if (!pushAvailable(this)) return
+        val push = PushHandler(this)
+        if (push.currentToken()?.let { push.onToken(it) } == true) return
+        e.state.map { it.connected }.distinctUntilChanged().filter { it }.first { push.currentToken()?.let { t -> push.onToken(t) } == true }
     }
 
     private fun onNotice(e: Engine, n: Notice) {
