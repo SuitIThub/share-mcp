@@ -51,4 +51,22 @@
     <string name="unpair_title">Gerät abmelden?</string>
     <string name="unpair_text">Laufende Übertragungen enden. Zum Wiederverwenden muss das Gerät neu gekoppelt werden.</string>
     <string name="unpair_offline">Lokal abgemeldet. Der Server war nicht erreichbar – entferne das Gerät dort mit „share-server devices rm“.</string>
+    <string name="connected">verbunden</string>
+    <string name="connecting">verbinde …</string>
+    <string name="incoming">Offene Anfragen</string>
+    <string name="no_incoming">Keine offenen Anfragen</string>
+    <string name="running">Laufend</string>
+    <string name="send_to">Senden an</string>
+    <string name="no_devices">Noch kein anderes Gerät gekoppelt</string>
+    <string name="all_devices">Allen anbieten</string>
+    <string name="files">Dateien …</string>
+    <string name="text_or_link">Text/Link</string>
+    <string name="send">Senden</string>
+    <string name="text_too_long">Zu lang (höchstens 64 KB)</string>
+    <string name="more_files">und %1$d weitere</string>
+    <string name="in_downloads">Im Download-Ordner</string>
+    <string name="open">Öffnen</string>
+    <string name="install">Installieren</string>
+    <string name="close">Schließen</string>
+    <string name="cannot_open">Keine App zum Öffnen gefunden. Die Datei liegt im Download-Ordner.</string>
 </resources>

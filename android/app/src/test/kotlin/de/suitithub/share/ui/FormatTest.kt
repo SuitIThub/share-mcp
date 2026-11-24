@@ -70,6 +70,11 @@ class FormatTest {
         assertEquals(50, Format.percent(Long.MAX_VALUE / 2, Long.MAX_VALUE))
     }
 
+    @Test fun httpTextIsSentAsLink() {
+        for (l in listOf("https://x.de", " https://x.de/a?b=c#d ")) assertEquals(Kind.LINK, Format.kindOf(l))
+        for (t in listOf("hallo", "schau: https://x.de", "https://x.de und mehr", "x.de", "")) assertEquals(t, Kind.TEXT, Format.kindOf(t))
+    }
+
     @Test fun onlyWebLinksOpen() {
         for (ok in listOf("https://x.de", "http://x", "HTTPS://X")) assertTrue(ok, Format.isWebLink(ok))
         for (bad in listOf("intent://x", "javascript:alert(1)", "file:///x", "content://x", "x.de", "", "https://", "https://a b")) assertTrue(bad, !Format.isWebLink(bad))

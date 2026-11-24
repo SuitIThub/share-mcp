@@ -76,6 +76,9 @@ object Format {
     /** Links of any other scheme are only copied, never opened. */
     fun isWebLink(s: String): Boolean = Regex("https?://\\S+", RegexOption.IGNORE_CASE).matches(s)
 
+    /** A single web address is a link, everything else text. */
+    fun kindOf(text: String): Kind = if (isWebLink(text.trim())) Kind.LINK else Kind.TEXT
+
     /** At most max code points. */
     private fun shorten(s: String, max: Int): String =
         if (s.codePointCount(0, s.length) <= max) s else s.substring(0, s.offsetByCodePoints(0, max)) + "…"
