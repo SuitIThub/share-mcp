@@ -24,7 +24,21 @@ dependencies {
     testImplementation(libs.mockwebserver)
 }
 
+// the tests talk to the real server and CLI; no Go means the build fails instead of silently skipping
+val goBin = providers.gradleProperty("goBin").orElse(providers.environmentVariable("GO_BIN")).orElse("go")
+val goOut = layout.buildDirectory.dir("go")
+val buildGo by tasks.registering(Exec::class) {
+    val serverDir = rootDir.resolve("../server")
+    inputs.files(fileTree(serverDir) { include("**/*.go", "go.mod", "go.sum") })
+    outputs.dir(goOut)
+    workingDir = serverDir
+    commandLine(goBin.get(), "build", "-o", goOut.get().asFile.path + File.separator, "./cmd/share-server", "./cmd/share")
+    environment("CGO_ENABLED", "0")
+}
+
 tasks.test {
+    dependsOn(buildGo)
+    systemProperty("share.go.dir", goOut.get().asFile.path)
     useJUnit()
     outputs.upToDateWhen { false }
     testLogging {
