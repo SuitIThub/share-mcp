@@ -123,6 +123,10 @@ class Engine(
         offers.values.any { it.kind == Kind.FILES } || s.downloads.any { it.phase == Phase.RUNNING }
     }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, false)
 
+    /** Like [hasWork], but never lags behind. */
+    val busy: Boolean
+        get() = sender.offers.value.values.any { it.kind == Kind.FILES } || _state.value.downloads.any { it.phase == Phase.RUNNING }
+
     init {
         scope.launch { sender.offers.collect { o -> _state.update { s -> s.copy(outgoing = o.values.sortedBy { it.createdAt }) } } }
         scope.launch {

@@ -1,4 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Share</string>
+    <string name="channel_offers">Angebote</string>
+    <string name="channel_transfers">Laufende Übertragungen</string>
+    <string name="channel_results">Ergebnisse</string>
+    <string name="accept">Annehmen</string>
+    <string name="decline">Ablehnen</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="received">%1$s empfangen</string>
+    <string name="failed">%1$s fehlgeschlagen</string>
+    <string name="text_copied">Text von %1$s kopiert</string>
+    <string name="link_copied">Link von %1$s kopiert</string>
+    <string name="copied">In die Zwischenablage kopiert</string>
+    <string name="unavailable">Angebot nicht mehr verfügbar</string>
+    <string name="transfers">%1$d Übertragungen</string>
+    <string name="offering">Biete an: %1$s</string>
+    <string name="transferring">wird übertragen</string>
+    <string name="no_connection">Keine Verbindung zum Server</string>
+    <string name="server_refused">Server lehnt ab: %1$s</string>
+    <string name="send_failed">Senden fehlgeschlagen</string>
+    <string name="open_app_to_continue">Share öffnen, um die Übertragung fortzusetzen</string>
 </resources>
