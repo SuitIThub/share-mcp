@@ -5,7 +5,6 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import de.suitithub.share.R
 import de.suitithub.share.ShareApp
 import de.suitithub.share.shareApp
 import kotlinx.coroutines.runBlocking
@@ -33,20 +32,19 @@ class PushHandler(private val app: ShareApp) {
         when (data["type"]) {
             "offer.new" -> try {
                 val t = withTimeout(15_000) { engine.offerDetails(id) } ?: return
-                if (!app.uiVisible) app.notifications.offer(t, engine.deviceName(t.senderId))
+                if (!app.uiVisible) app.announce(engine, t)
             } catch (_: IOException) {
-                hint()
+                app.notifications.hint(id)
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                hint()
+                app.notifications.hint(id)
             }
             "offer.removed" -> {
                 engine.forgetOffer(id)
                 app.notifications.removeOffer(id)
+                app.notifications.removeHint(id)
             }
         }
     }
-
-    private fun hint() = app.notifications.message(app.getString(R.string.new_offer), app.getString(R.string.open_app))
 
     /** Reports the token to the server; on failure the next connection tries again. */
     suspend fun onToken(token: String): Boolean {

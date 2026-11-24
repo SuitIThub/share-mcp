@@ -17,6 +17,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 class EventsTest {
     private lateinit var go: GoServer
@@ -85,6 +86,13 @@ class EventsTest {
             assertEquals(ServerEvent.Unauthorised, ch.receive())
             job.join()
         }
+    }
+
+    /** The server cancels file offers after 30 s without connection, so the pauses must stay well below. */
+    @Test fun pausesStayShort() {
+        val pauses = generateSequence(1.seconds) { nextPause(it) }.take(20).toList()
+        assertEquals(1.seconds, pauses.first())
+        assertTrue("$pauses", pauses.all { it <= 5.seconds } && pauses.last() == 5.seconds)
     }
 
     @Test fun neverConnectedIsNotReportedAsDisconnected() = runBlocking {

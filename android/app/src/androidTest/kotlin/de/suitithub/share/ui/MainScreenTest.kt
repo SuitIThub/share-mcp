@@ -55,6 +55,8 @@ class MainScreenTest {
         override fun sendText(text: String, targets: List<String>, broadcast: Boolean) { calls += "text $text $targets $broadcast" }
         override fun openResult(d: Download) { calls += "open ${d.transfer.id}" }
         override fun openSettings() { calls += "settings" }
+        override fun openLink(url: String) { calls += "link $url" }
+        override fun copy(text: String) { calls += "copy $text" }
     }
 
     private val desk = Device("d1", "Desktop", DeviceType.WINDOWS, online = true)
@@ -130,6 +132,30 @@ class MainScreenTest {
         ui.onNodeWithTag("cancel:o1").performClick()
         ui.onNodeWithTag("cancel:d").performClick()
         assertEquals(listOf("cancelOutgoing o1", "cancelDownload d"), calls)
+    }
+
+    @Test fun outcomeOfOwnOffersIsShownUntilDismissed() {
+        show(
+            EngineState(
+                true, names = names,
+                sent = listOf(files("s1", "app.apk" to 1, sender = "me", deliveries = listOf(Delivery("d1", Status.DELIVERED, Path.LAN, 1), Delivery("d2", Status.MISSED)))),
+            ),
+        )
+        ui.onNodeWithText("Desktop: zugestellt").assertIsDisplayed()
+        ui.onNodeWithText("Tablet: verpasst").assertIsDisplayed()
+        ui.onNodeWithTag("dismiss:s1").performClick()
+        assertEquals(listOf("dismiss s1"), calls)
+    }
+
+    @Test fun acceptedTextsCanBeCopiedAndLinksOpened() {
+        fun got(id: String, kind: Kind, text: String) = Transfer(id, "d1", kind, text = text, expiresAt = Instant.now())
+        show(EngineState(true, names = names, received = listOf(got("r1", Kind.LINK, "https://x.de"), got("r2", Kind.TEXT, "hallo"), got("r3", Kind.LINK, "intent://x"))))
+        ui.onNodeWithTag("openLink:r1").performClick()
+        ui.onNodeWithTag("copy:r2").performClick()
+        ui.onNodeWithTag("openLink:r2").assertDoesNotExist()
+        ui.onNodeWithTag("openLink:r3").assertDoesNotExist()
+        ui.onNodeWithTag("dismiss:r1").performClick()
+        assertEquals(listOf("link https://x.de", "copy hallo", "dismiss r1"), calls)
     }
 
     private fun withDevices() = EngineState(true, devices = listOf(desk, tab), names = names)

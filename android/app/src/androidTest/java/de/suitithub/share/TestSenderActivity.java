@@ -1,6 +1,7 @@
 package de.suitithub.share;
 
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -19,7 +20,9 @@ public class TestSenderActivity extends Activity {
         if (uris.size() == 1) i.putExtra(Intent.EXTRA_STREAM, uris.get(0));
         else i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
         i.setPackage("de.suitithub.share");
-        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        // an own clip keeps the system from adding the grant for EXTRA_STREAM
+        if (getIntent().getBooleanExtra("nogrant", false)) i.setClipData(ClipData.newPlainText("", ""));
+        else i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         startActivity(i);
         finish();
     }

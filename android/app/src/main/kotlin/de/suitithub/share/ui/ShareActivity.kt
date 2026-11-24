@@ -9,17 +9,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -30,12 +30,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,8 +78,9 @@ fun parseShare(intent: Intent, ownAuthority: (String) -> Boolean): SharePayload 
         Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Parcelable::class.java)?.forEach { if (it is Uri) uris += it }
         else -> return SharePayload.Empty
     }
-    if (uris.isEmpty()) intent.clipData?.let { c -> (0 until c.itemCount).forEach { i -> c.getItemAt(i).uri?.let { uris += it } } }
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
+    // with a text, the clip data is only the preview picture of the share sheet
+    if (uris.isEmpty() && text.isBlank()) intent.clipData?.let { c -> (0 until c.itemCount).forEach { i -> c.getItemAt(i).uri?.let { uris += it } } }
     if (uris.isNotEmpty()) {
         if (uris.any { it.scheme != ContentResolver.SCHEME_CONTENT || ownAuthority(it.authority.orEmpty()) }) return SharePayload.Rejected
         return SharePayload.Files(uris.toList(), text.take(MAX_MESSAGE))
@@ -106,19 +107,19 @@ class ShareActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Sheet(content: @Composable () -> Unit) = Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable(remember { MutableInteractionSource() }, indication = null) { finish() },
+    private fun Sheet(content: @Composable ColumnScope.() -> Unit) = Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).pointerInput(Unit) { detectTapGestures { finish() } },
         contentAlignment = Alignment.BottomCenter,
     ) {
         Surface(
-            // swallows taps that would otherwise close the sheet
-            Modifier.fillMaxWidth().clickable(remember { MutableInteractionSource() }, indication = null) {},
+            // swallows taps that would otherwise close the sheet; not clickable, which would be one big button for screen readers
+            Modifier.fillMaxWidth().pointerInput(Unit) { detectTapGestures { } },
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        ) { Column(Modifier.navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
+        ) { Column(Modifier.safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
     }
 
     @Composable
-    private fun Content(payload: SharePayload) {
+    private fun ColumnScope.Content(payload: SharePayload) {
         val engine by shareApp.engine.collectAsStateWithLifecycle()
         val e = engine
         when {
@@ -137,7 +138,7 @@ class ShareActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Choose(e: Engine, payload: SharePayload) {
+    private fun ColumnScope.Choose(e: Engine, payload: SharePayload) {
         val state by e.state.collectAsStateWithLifecycle()
         var selected by rememberSaveable { mutableStateOf(emptyList<String>()) }
         var all by rememberSaveable { mutableStateOf(false) }
@@ -153,7 +154,7 @@ class ShareActivity : ComponentActivity() {
         )
         if (state.unauthorised) Text(stringResource(R.string.revoked), color = MaterialTheme.colorScheme.error)
         else if (state.devices.isEmpty()) Text(stringResource(if (state.connected) R.string.no_devices else R.string.connecting))
-        LazyColumn(Modifier.heightIn(max = 400.dp)) {
+        LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 400.dp)) {
             targetItems(state.devices, if (all) emptyList() else selected, all, { selected = it; all = false }, { all = it })
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

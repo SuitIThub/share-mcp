@@ -74,4 +74,7 @@
     <string name="pair_first">Dieses Gerät muss zuerst gekoppelt werden. Öffne dazu die App.</string>
     <string name="send_one_file">1 Datei senden</string>
     <string name="send_files">%1$d Dateien senden</string>
+    <string name="cannot_open_link">Keine App zum Öffnen des Links gefunden</string>
+    <string name="copy">Kopieren</string>
+    <string name="offer_ended">%1$s: Angebot beendet</string>
 </resources>

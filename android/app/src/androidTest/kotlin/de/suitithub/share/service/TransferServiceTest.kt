@@ -179,6 +179,86 @@ class TransferServiceTest {
         hold.close()
     }
 
+    @Test fun unpairingWhileOfferingStopsTheService() {
+        TransferService.offer(ctx, listOf(TestProvider.uri("plain", 10, "weg.txt")), listOf(peer.account.deviceId), false, "")
+        eventually("offered") { peer.engine.state.value.incoming.isNotEmpty() && "Biete an: weg.txt" in TestEnv.titles() }
+        app.setAccount(null)
+        eventuallyIdle()
+        eventually("notification gone") { "Biete an: weg.txt" !in TestEnv.titles() }
+    }
+
+    @Test fun unpairingWhileDownloadingStopsTheService() {
+        val t = offerToApp(ByteArray(3_000_000), "weg.bin", delayMs = 100)
+        notify(t.id)[1].actionIntent.send()
+        eventually("running") { TransferService.running && "weg.bin" in TestEnv.titles() }
+        app.setAccount(null)
+        eventuallyIdle()
+    }
+
+    @Test fun serviceFollowsANewPairing() {
+        TransferService.offer(ctx, listOf(TestProvider.uri("plain", 10, "alt.txt")), listOf(peer.account.deviceId), false, "")
+        eventually("offered") { "Biete an: alt.txt" in TestEnv.titles() }
+        runBlocking { TestEnv.pairApp() }
+        TransferService.offer(ctx, listOf(TestProvider.uri("plain", 10, "neu.txt")), listOf(peer.account.deviceId), false, "")
+        eventually("new one shown") { "Biete an: neu.txt" in TestEnv.titles() }
+        runBlocking { engine.cancelOutgoing(engine.state.value.outgoing.single().id) }
+        eventuallyIdle()
+    }
+
+    @Test fun serviceComesBackWhileThereIsWork() {
+        TransferService.offer(ctx, listOf(TestProvider.uri("plain", 10, "bleib.txt")), listOf(peer.account.deviceId), false, "")
+        eventually("offered") { peer.engine.state.value.incoming.isNotEmpty() }
+        val first = TransferService.starts
+        ctx.stopService(android.content.Intent(ctx, TransferService::class.java))
+        eventually("restarted") { TransferService.starts > first && TransferService.running }
+        runBlocking { engine.cancelOutgoing(engine.state.value.outgoing.single().id) }
+    }
+
+    /** Android ends data sync services after some hours; the advice to open the app must then help. */
+    @Test fun openingTheAppRestartsAServiceThatTimedOut() {
+        fun sh(c: String) = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(c),
+        ).use { it.readBytes().decodeToString() }
+        // being on top resets the time used so far
+        androidx.test.core.app.ActivityScenario.launch(de.suitithub.share.ui.MainActivity::class.java).use { eventually("shown") { app.uiVisible } }
+        sh("device_config put activity_manager data_sync_fgs_timeout_duration 4000")
+        try {
+            TransferService.offer(ctx, listOf(TestProvider.uri("plain", 10, "lang.txt")), listOf(peer.account.deviceId), false, "")
+            eventually("offered") { peer.engine.state.value.incoming.isNotEmpty() }
+            eventually("timed out", 20) { !TransferService.running && "Share öffnen, um die Übertragung fortzusetzen" in TestEnv.titles() }
+            sh("device_config delete activity_manager data_sync_fgs_timeout_duration")
+            androidx.test.core.app.ActivityScenario.launch(de.suitithub.share.ui.MainActivity::class.java).use {
+                eventually("running again") { TransferService.running }
+            }
+        } finally {
+            sh("device_config delete activity_manager data_sync_fgs_timeout_duration")
+            engine.state.value.outgoing.forEach { runBlocking { engine.cancelOutgoing(it.id) } }
+        }
+    }
+
+    @Test fun offersSeenByNobodyAreAnnouncedWhenTheUiCloses() {
+        val hold = engine.hold()
+        eventually("connected") { engine.state.value.connected }
+        val shown = app.uiShown()
+        val t = runBlocking { peer.engine.offerText(Kind.TEXT, "hallo", listOf(appName), false) }
+        eventually("arrived") { engine.state.value.incoming.any { it.id == t.id } }
+        shown.close()
+        eventually("announced") { TestEnv.active(t.id) != null }
+        // dismissed by the user: not again
+        TestEnv.notifications.cancel(t.id, Notifications.OFFER)
+        app.uiShown().close()
+        Thread.sleep(300)
+        assertNull(TestEnv.active(t.id))
+        hold.close()
+    }
+
+    @Test fun outcomeOfAnOfferIsAnnounced() {
+        TransferService.offer(ctx, listOf(TestProvider.uri("plain", 10, "ergebnis.txt")), listOf(peer.account.deviceId), false, "")
+        eventually("offered") { peer.engine.state.value.incoming.isNotEmpty() }
+        runBlocking { peer.engine.decline(peer.engine.state.value.incoming.single().id) }
+        eventually("told") { TestEnv.notifications.activeNotifications.any { it.notification.extras.getCharSequence("android.text").toString() == "${peer.account.name}: abgelehnt" } }
+    }
+
     @Test fun answeringInTheUiRemovesTheNotification() {
         val t = runBlocking { peer.engine.offerText(Kind.TEXT, "hallo", listOf(appName), false) }
         notify(t.id)

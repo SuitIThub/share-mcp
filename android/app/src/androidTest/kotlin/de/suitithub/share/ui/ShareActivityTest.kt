@@ -2,6 +2,7 @@ package de.suitithub.share.ui
 
 import android.Manifest
 import android.content.Intent
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasTestTag
@@ -63,16 +64,21 @@ class ShareActivityTest {
         // the device list grows with every test
         waitFor(hasScrollToNodeAction())
         eventually("devices") { TestEnv.app.engine.value!!.state.value.devices.any { it.id == peer.account.deviceId } }
-        ui.waitForIdle()
-        ui.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag(target))
-        ui.onNodeWithTag("shareSend").assertIsNotEnabled()
+        // the screen follows the engine a moment later
+        var last: Throwable? = null
+        try {
+            ui.waitUntil(15_000) { runCatching { ui.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag(target)) }.onFailure { last = it }.isSuccess }
+        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("cannot scroll to $target; devices " + TestEnv.app.engine.value!!.state.value.devices.map { it.id }, last)
+        }
+        ui.onNodeWithTag("shareSend").assertIsDisplayed().assertIsNotEnabled()
         ui.onNodeWithTag(target).performClick()
         ui.onNodeWithTag("shareSend").performClick()
     }
 
-    private fun senderApp(vararg uris: android.net.Uri) = ctx.startActivity(
+    private fun senderApp(vararg uris: android.net.Uri, grant: Boolean = true) = ctx.startActivity(
         Intent().setClassName(ctx.packageName + ".test", "de.suitithub.share.TestSenderActivity")
-            .putStringArrayListExtra("uris", ArrayList(uris.map { it.toString() })).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            .putStringArrayListExtra("uris", ArrayList(uris.map { it.toString() })).putExtra("nogrant", !grant).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
     )
 
     /** The permission was given to our activity only, and the sharing app is gone by the time the file is read. */
@@ -125,6 +131,27 @@ class ShareActivityTest {
     @Test fun tooLongTextShowsHint() {
         launch(text("a".repeat(70_000)))
         waitFor(hasText("höchstens 64 KB", substring = true))
+    }
+
+    /** An app may name an item it has not given us access to. */
+    @Test fun itemWithoutPermissionIsToldNotACrash() {
+        senderApp(TestProvider.uri(TestProvider.GUARDED, "plain", 1, "fremd.txt"), grant = false)
+        chooseAndSend()
+        eventually("told") { "Senden fehlgeschlagen" in TestEnv.titles() }
+        eventually("stopped") { !TransferService.running }
+    }
+
+    @Test fun buttonsStayReachableWithManyDevicesInLandscape() {
+        runBlocking { repeat(8) { TestEnv.account("Viel") } }
+        val dev = androidx.test.uiautomator.UiDevice.getInstance(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation())
+        dev.setOrientationLeft()
+        try {
+            launch(text("quer"))
+            chooseAndSend()
+            eventually("offered") { peer.engine.state.value.incoming.map { it.text } == listOf("quer") }
+        } finally {
+            dev.setOrientationNatural()
+        }
     }
 
     @Test fun withoutConnectionTheErrorIsTold() {

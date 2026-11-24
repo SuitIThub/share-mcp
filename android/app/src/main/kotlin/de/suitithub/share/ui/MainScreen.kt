@@ -64,6 +64,8 @@ interface MainActions {
     fun sendText(text: String, targets: List<String>, broadcast: Boolean)
     fun openResult(d: Download)
     fun openSettings()
+    fun openLink(url: String)
+    fun copy(text: String)
 }
 
 @Composable
@@ -104,9 +106,11 @@ fun MainScreen(state: EngineState, actions: MainActions) {
         if (state.incoming.isEmpty()) item { Text(stringResource(R.string.no_incoming)) }
         items(state.incoming, key = { "in:" + it.id }) { t -> Incoming(t, state, now, actions) { detail = t.id } }
 
-        if (state.outgoing.isNotEmpty() || state.downloads.isNotEmpty()) item { Heading(R.string.running) }
+        if (listOf(state.outgoing, state.downloads, state.sent, state.received).any { it.isNotEmpty() }) item { Heading(R.string.running) }
         items(state.outgoing, key = { "out:" + it.id }) { Outgoing(it, state, now, actions) }
         items(state.downloads, key = { "dl:" + it.transfer.id }) { DownloadRow(it, state, actions) }
+        items(state.received, key = { "rcv:" + it.id }) { Received(it, state, actions) }
+        items(state.sent, key = { "sent:" + it.id }) { Sent(it, state, actions) }
 
         item { Heading(R.string.send_to) }
         if (state.devices.isEmpty()) item { Text(stringResource(R.string.no_devices)) }
@@ -212,6 +216,30 @@ private fun Outgoing(t: Transfer, state: EngineState, now: Instant, actions: Mai
                 Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
             )
             TextButton(onClick = { actions.cancelOutgoing(t.id) }, modifier = Modifier.testTag("cancel:" + t.id)) { Text(stringResource(R.string.cancel)) }
+        }
+    }
+}
+
+/** A finished offer with its outcome. */
+@Composable
+private fun Sent(t: Transfer, state: EngineState, actions: MainActions) = Card(Modifier.fillMaxWidth()) {
+    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("↑ " + Format.shortName(t), style = MaterialTheme.typography.titleSmall)
+        for (d in t.deliveries) Text("${state.name(d.deviceId)}: ${Format.status(d.status, d.path)}")
+        Dismiss(t.id, actions)
+    }
+}
+
+/** An accepted text or link; it is in the clipboard, but that may have been overwritten. */
+@Composable
+private fun Received(t: Transfer, state: EngineState, actions: MainActions) = Card(Modifier.fillMaxWidth()) {
+    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("↓ " + Format.offerTitle(t, state.name(t.senderId)), style = MaterialTheme.typography.titleSmall)
+        Text(t.text, maxLines = 4, overflow = TextOverflow.Ellipsis)
+        Row {
+            if (Format.isWebLink(t.text)) TextButton(onClick = { actions.openLink(t.text) }, modifier = Modifier.testTag("openLink:" + t.id)) { Text(stringResource(R.string.open)) }
+            TextButton(onClick = { actions.copy(t.text) }, modifier = Modifier.testTag("copy:" + t.id)) { Text(stringResource(R.string.copy)) }
+            Dismiss(t.id, actions)
         }
     }
 }

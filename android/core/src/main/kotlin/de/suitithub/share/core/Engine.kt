@@ -62,6 +62,10 @@ data class EngineState(
     val incoming: List<Transfer> = emptyList(),
     val outgoing: List<Transfer> = emptyList(),
     val downloads: List<Download> = emptyList(),
+    /** own offers that have ended, with their outcome, until dismissed */
+    val sent: List<Transfer> = emptyList(),
+    /** accepted texts and links, until dismissed */
+    val received: List<Transfer> = emptyList(),
 )
 
 sealed interface Notice {
@@ -69,6 +73,9 @@ sealed interface Notice {
     data class OfferGone(val id: String) : Notice
     data class DownloadDone(val download: Download) : Notice
     data class DownloadFailed(val download: Download) : Notice
+
+    /** One of our offers ended (not by cancelling it here); carries the final status per receiver. */
+    data class OfferEnded(val transfer: Transfer) : Notice
 
     /** An accepted text or link. */
     data class TextReceived(val transfer: Transfer) : Notice
@@ -100,7 +107,7 @@ class Engine(
     private val opts: EngineOptions = EngineOptions(),
 ) {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext.job))
-    private val sender = Sender(api, opts.endpointPort, opts.candidates)
+    private val sender = Sender(api, opts.endpointPort, opts.candidates, ::onOfferEnded)
     private val receiver = Receiver(api, store, opts.probeTimeout, opts.idleTimeout, opts.backoffBase)
 
     private val _state = MutableStateFlow(EngineState())
@@ -152,6 +159,20 @@ class Engine(
                 delay(opts.tick)
                 expire()
             }
+        }
+    }
+
+    private fun onOfferEnded(last: Transfer) {
+        scope.launch {
+            // the closing event may overtake the last status
+            val t = try {
+                api.transfer(last.id)
+            } catch (_: IOException) {
+                last
+            }
+            if (t.deliveries.any { it.deviceId !in _state.value.names }) runCatchingIo { loadDevices() }
+            _state.update { s -> s.copy(sent = (s.sent.filter { it.id != t.id } + t).sortedBy { it.createdAt }.takeLast(KEEP)) }
+            _notices.tryEmit(Notice.OfferEnded(t))
         }
     }
 
@@ -325,6 +346,7 @@ class Engine(
                 return
             }
             take(id)
+            _state.update { s -> s.copy(received = (s.received + t).takeLast(KEEP)) }
             _notices.tryEmit(Notice.TextReceived(t))
         } catch (e: ApiException) {
             if (!e.gone) throw e
@@ -425,9 +447,14 @@ class Engine(
         }
     }
 
-    /** Removes a finished or failed download from the list. */
-    fun dismiss(id: String) =
-        _state.update { s -> s.copy(downloads = s.downloads.filter { it.transfer.id != id || it.phase == Phase.RUNNING }) }
+    /** Removes a finished entry from the lists. */
+    fun dismiss(id: String) = _state.update { s ->
+        s.copy(
+            downloads = s.downloads.filter { it.transfer.id != id || it.phase == Phase.RUNNING },
+            sent = s.sent.filter { it.id != id },
+            received = s.received.filter { it.id != id },
+        )
+    }
 
     private fun expire() {
         val now = opts.now()
@@ -447,6 +474,7 @@ class Engine(
         scope.cancel()
         sender.close()
         api.close()
+        _state.value = EngineState() // whoever still watches must not see running transfers for ever
     }
 
     private suspend fun runCatchingIo(block: suspend () -> Unit) {
@@ -456,6 +484,9 @@ class Engine(
         }
     }
 }
+
+/** Finished entries are not a history. */
+private const val KEEP = 20
 
 /** The offer does not exist (for us) any more. */
 private val ApiException.gone get() = status == 403 || status == 404 || status == 409 || status == 410

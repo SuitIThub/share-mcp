@@ -184,8 +184,8 @@ class ReceiverTest {
             override fun part(transferId: String, index: Int, item: FileItem): Part {
                 val p = store.part(transferId, index, item)
                 return object : Part by p {
-                    override fun append(): OutputStream {
-                        val out = p.append()
+                    override fun append(offset: Long): OutputStream {
+                        val out = p.append(offset)
                         return object : OutputStream() {
                             var n = 0
                             override fun write(b: Int) = throw IOException("ENOSPC")
@@ -274,7 +274,7 @@ class ReceiverTest {
     @Test fun oversizedPartStartsOver() = runBlocking {
         val f = file(1000)
         val t = offer(f)
-        store.part(t.id, 0, f.item).append().use { it.write(ByteArray(2000)) }
+        store.part(t.id, 0, f.item).append(0).use { it.write(ByteArray(2000)) }
         val refs = receiver().download(t) { _, _ -> }
         assertArrayEquals(f.file.readBytes(), content(refs.single()))
     }
@@ -340,13 +340,69 @@ class ReceiverTest {
         }) { r, t, _ -> assertEquals("hello", File(r.download(t) { _, _ -> }.single()).readText()) }
     }
 
-    @Test fun longerAnswerThanOfferedIsCutOff() = scripted({ p ->
-        when (p) {
-            "/accept" -> ok("{}")
-            "/files/0" -> ok("hello world, much longer")
-            else -> code(204)
+    /** e.g. a maintenance or login page answered with 200 by a proxy. */
+    @Test fun answersOfTheWrongLengthAreNeverStored() {
+        var n = 0
+        scripted({ p ->
+            when (p) {
+                "/accept" -> ok("{}")
+                "/files/0" -> when (n++) {
+                    0 -> ok("<html>maintenance</html>")
+                    1 -> ok("hi")
+                    2 -> MockResponse.Builder().chunkedBody("<html>", 3).build()
+                    3 -> MockResponse.Builder().code(302).addHeader("Location", "/login").build()
+                    else -> ok("hello")
+                }
+                "/login" -> ok("login")
+                "" -> ok("""{"id":"t1","sender_id":"s","kind":"files","expires_at":"2099-01-01T00:00:00Z","deliveries":[{"device_id":"x","status":"accepted"}]}""")
+                else -> code(204)
+            }
+        }) { r, t, _ ->
+            assertEquals("hello", File(r.download(t) { _, _ -> }.single()).readText())
+            assertEquals(5, n)
         }
-    }) { r, t, _ -> assertEquals("hello", File(r.download(t) { _, _ -> }.single()).readText()) }
+    }
+
+    @Test fun partialAnswerFromTheWrongOffsetIsNotStored() {
+        var n = 0
+        scripted({ p ->
+            when (p) {
+                "/accept" -> ok("{}")
+                "/files/0" -> MockResponse.Builder().code(206).body(if (n == 0) "xxx" else "llo")
+                    .addHeader("Content-Range", if (n++ == 0) "bytes 0-2/5" else "bytes 2-4/5").build()
+                "" -> ok("""{"id":"t1","sender_id":"s","kind":"files","expires_at":"2099-01-01T00:00:00Z","deliveries":[{"device_id":"x","status":"accepted"}]}""")
+                else -> code(204)
+            }
+        }) { r, t, _ ->
+            store.part("t1", 0, t.files[0]).append(0).use { it.write("he".toByteArray()) }
+            assertEquals("hello", File(r.download(t) { _, _ -> }.single()).readText())
+        }
+    }
+
+    /** The store briefly cannot see its own part (e.g. Android's media provider restarts). */
+    @Test fun busyStorageIsRetriedAndNeverMixesOffsets() = runBlocking {
+        val f = file(500_000)
+        val t = offer(f)
+        store.part(t.id, 0, f.item).append(0).use { it.write(f.file.readBytes(), 0, 200_000) }
+        var sizes = 0
+        var appends = 0
+        val flaky = object : DownloadStore by store {
+            override fun part(transferId: String, index: Int, item: FileItem): Part {
+                val p = store.part(transferId, index, item)
+                return object : Part by p {
+                    override fun size(): Long = when (sizes++) {
+                        0 -> throw StorageBusyException("busy")
+                        1 -> 0 // wrongly empty: append(0) must cut the old bytes off
+                        else -> p.size()
+                    }
+
+                    override fun append(offset: Long): OutputStream = if (appends++ == 1) throw StorageBusyException("busy") else p.append(offset)
+                }
+            }
+        }
+        val refs = withTimeout(10_000) { receiver(flaky).download(t) { _, _ -> } }
+        assertArrayEquals(f.file.readBytes(), content(refs.single()))
+    }
 
     @Test fun unreachableServerLongAfterExpiryGivesUpButKeepsThePart() = scripted({ p ->
         when (p) {

@@ -19,6 +19,8 @@ class Sender(
     private val api: Api,
     endpointPort: Int = 47800,
     private val candidates: (Int) -> List<String> = ::lanCandidates,
+    /** An offer ended other than by our own cancelling; gets its last known state. */
+    private val onEnded: (Transfer) -> Unit = {},
 ) {
     private val lock = Any()
     private val own = HashMap<String, Offer>()
@@ -114,7 +116,12 @@ class Sender(
     }
 
     /** Ends an offer locally only. */
-    fun drop(id: String) = remove(id)
+    fun drop(id: String) = ended(id)
+
+    private fun ended(id: String) {
+        val last = _offers.value[id]
+        if (remove(id) && last != null) onEnded(last)
+    }
 
     suspend fun onEvent(e: ServerEvent, scope: CoroutineScope) {
         when (e) {
@@ -141,7 +148,7 @@ class Sender(
         }
         when (e) {
             is ServerEvent.DeliveryUpdated -> updateDelivery(id, e.update.delivery)
-            is ServerEvent.TransferClosed -> remove(id)
+            is ServerEvent.TransferClosed -> ended(id)
             else -> Unit
         }
     }
@@ -158,7 +165,7 @@ class Sender(
         val open = api.outgoing().associateBy { it.id }
         for (id in known) {
             val t = open[id]
-            if (t == null) remove(id) else _offers.update { if (id in it) it + (id to t) else it }
+            if (t == null) ended(id) else _offers.update { if (id in it) it + (id to t) else it }
         }
         for (t in open.values) {
             if (t.id in known) continue
@@ -209,9 +216,10 @@ class Sender(
         }
     }
 
-    private fun remove(id: String) {
+    /** False if it was not open any more. */
+    private fun remove(id: String): Boolean {
         val (offer, jobs) = synchronized(lock) {
-            val o = own.remove(id) ?: return
+            val o = own.remove(id) ?: return false
             _offers.update { it - id }
             endpoint.closeConnections(id)
             stopEndpointIfIdle()
@@ -219,6 +227,7 @@ class Sender(
         }
         jobs.forEach { it.cancel() }
         offer.sources.forEach { it.release() }
+        return true
     }
 
     private fun stopEndpointIfIdle() {

@@ -88,6 +88,16 @@ class NotificationsTest {
         }
     }
 
+    @Test fun failureHintsStayAndDoNotReplaceEachOther() {
+        n.message("Senden fehlgeschlagen", "a")
+        n.message("Senden fehlgeschlagen", "b")
+        n.unavailable()
+        TestEnv.eventually("all three") { TestEnv.titles().size == 3 }
+        val all = TestEnv.notifications.activeNotifications.map { it.notification }
+        assertEquals(2, all.count { it.title() == "Senden fehlgeschlagen" && it.timeoutAfter !in 1..3_600_000L })
+        assertTrue(all.single { it.title() == "Angebot nicht mehr verfügbar" }.timeoutAfter > 0)
+    }
+
     private fun outgoing(id: String = "o1") = offer(id).copy(deliveries = listOf(Delivery("d", Status.DOWNLOADING, Path.LAN, 10)))
 
     @Test fun progressOfASingleOffer() {

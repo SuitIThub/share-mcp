@@ -9,10 +9,13 @@ import android.provider.MediaStore
 import de.suitithub.share.core.DownloadStore
 import de.suitithub.share.core.FileItem
 import de.suitithub.share.core.Part
+import de.suitithub.share.core.StorageBusyException
 import de.suitithub.share.core.safeFileName
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.OutputStream
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * Downloads directly into the public Download folder. Incomplete files are "pending" MediaStore rows, invisible to
@@ -56,20 +59,32 @@ class MediaStoreDownloads(context: Context, prefsName: String = "downloads") : D
 
         override fun size(): Long = pending()?.let { length(it) } ?: 0
 
+        /** Null only if the row is really gone; anything else that keeps us from reading it is temporary. */
         private fun length(uri: Uri): Long? = try {
-            cr.openFileDescriptor(uri, "r")?.use { it.statSize }
-        } catch (_: FileNotFoundException) {
-            null
-        } catch (_: RuntimeException) { // not ours (any more)
-            null
+            cr.openFileDescriptor(uri, "r")?.use { it.statSize } ?: throw StorageBusyException("no descriptor")
+        } catch (e: FileNotFoundException) {
+            if (exists(uri)) throw StorageBusyException("cannot open $name", e) else null
+        } catch (e: RuntimeException) {
+            if (exists(uri)) throw StorageBusyException("cannot open $name", e) else null
         }
 
-        override fun append(): OutputStream = io {
-            val uri = pending()?.takeIf { length(it) != null } ?: create()
-            val pfd = cr.openFileDescriptor(uri, "rw") ?: throw IOException("cannot open $name")
+        private fun exists(uri: Uri): Boolean = try {
+            @Suppress("DEPRECATION") // its replacement needs API 30
+            cr.query(MediaStore.setIncludePending(uri), arrayOf(MediaStore.Downloads._ID), null, null, null)?.use { it.moveToFirst() }
+                ?: throw StorageBusyException("no answer from the media provider")
+        } catch (e: RuntimeException) {
+            throw StorageBusyException("no answer from the media provider", e)
+        }
+
+        override fun append(offset: Long): OutputStream = io {
+            val known = pending()?.takeIf { length(it) != null }
+            if (known == null && offset > 0) throw StorageBusyException("$name is gone")
+            val pfd = cr.openFileDescriptor(known ?: create(), "rw") ?: throw IOException("cannot open $name")
             val out = ParcelFileDescriptor.AutoCloseOutputStream(pfd)
             try {
-                out.channel.position(out.channel.size())
+                if (out.channel.size() < offset) throw StorageBusyException("$name is shorter than expected")
+                out.channel.truncate(offset)
+                out.channel.position(offset)
             } catch (e: IOException) {
                 out.close()
                 throw e
@@ -86,6 +101,7 @@ class MediaStoreDownloads(context: Context, prefsName: String = "downloads") : D
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw IOException("cannot create $name")
+            cr.openFileDescriptor(uri, "rw")?.close() // a row without a file could neither be read nor published
             store(uri.toString())
             return uri
         }
@@ -100,13 +116,28 @@ class MediaStoreDownloads(context: Context, prefsName: String = "downloads") : D
         }
 
         override fun finish(): String = io {
-            // a row without a file (empty download) would vanish on publishing
-            val uri = pending()?.takeIf { length(it) != null } ?: create().also { cr.openFileDescriptor(it, "rw")?.close() }
-            if (cr.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null) != 1) {
-                throw IOException("cannot finish $name")
+            val uri = pending()?.takeIf { length(it) != null } ?: create()
+            try {
+                publish(uri, null)
+            } catch (_: IllegalStateException) {
+                publish(uri, timestamped()) // MediaStore gives up after "name (32)"
             }
             store(DONE + uri)
             uri.toString()
+        }
+
+        private fun publish(uri: Uri, newName: String?) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.IS_PENDING, 0)
+                if (newName != null) put(MediaStore.Downloads.DISPLAY_NAME, newName)
+            }
+            if (cr.update(uri, values, null, null) != 1) throw IOException("cannot finish $name")
+        }
+
+        private fun timestamped(): String {
+            val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+            val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH-mm-ss-SSS"))
+            return name.substring(0, dot) + " ($now)" + name.substring(dot)
         }
 
         private fun <T> io(block: () -> T): T = try {

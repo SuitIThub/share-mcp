@@ -55,7 +55,11 @@ class DirStore(private val dir: File) : DownloadStore {
         private val marker = File(parts, "$transferId-$index.done")
         override val finishedRef get() = marker.takeIf { it.exists() }?.readText()
         override fun size() = part.length()
-        override fun append(): OutputStream = FileOutputStream(part, true)
+        override fun append(offset: Long): OutputStream {
+            if (part.length() < offset) throw StorageBusyException("part is shorter than expected")
+            RandomAccessFile(part, "rw").use { it.setLength(offset) }
+            return FileOutputStream(part, true)
+        }
         override fun reset() {
             part.delete()
         }

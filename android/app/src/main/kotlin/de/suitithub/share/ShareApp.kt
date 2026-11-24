@@ -11,7 +11,7 @@ import de.suitithub.share.core.Account
 import de.suitithub.share.core.Api
 import de.suitithub.share.core.Engine
 import de.suitithub.share.core.Notice
-import de.suitithub.share.core.Phase
+import de.suitithub.share.core.Transfer
 import de.suitithub.share.data.ContentSource
 import de.suitithub.share.data.MediaStoreDownloads
 import de.suitithub.share.data.SecureStore
@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -49,6 +50,9 @@ class ShareApp : Application() {
     private var observer: Job? = null
     private var account: Account? = null
     private val visible = AtomicInteger()
+
+    /** offers that have had a notification; a dismissed one must not come back */
+    private val announced: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /** Null while the device is not paired. */
     val engine: StateFlow<Engine?> = _engine.asStateFlow()
@@ -114,11 +118,7 @@ class ShareApp : Application() {
         launch { syncPushToken(e) }
         launch {
             e.hasWork.collect { work ->
-                if (work) try {
-                    TransferService.keepAlive(this@ShareApp)
-                } catch (_: IllegalStateException) { // not allowed from the background; it works as long as the process lives
-                    notifications.message(getString(R.string.open_app_to_continue))
-                }
+                if (work) ensureService()
             }
         }
     }
@@ -133,7 +133,7 @@ class ShareApp : Application() {
 
     private fun onNotice(e: Engine, n: Notice) {
         when (n) {
-            is Notice.OfferArrived -> if (!uiVisible) notifications.offer(n.transfer, e.deviceName(n.transfer.senderId))
+            is Notice.OfferArrived -> if (!uiVisible) announce(e, n.transfer)
             is Notice.OfferGone -> notifications.removeOffer(n.id)
             is Notice.DownloadDone -> if (!uiVisible) notifications.result(n.download)
             is Notice.DownloadFailed -> if (!uiVisible) notifications.result(n.download)
@@ -141,6 +141,7 @@ class ShareApp : Application() {
                 copy(n.transfer.text)
                 if (uiVisible) toast(getString(R.string.copied)) else notifications.text(n.transfer, e.deviceName(n.transfer.senderId))
             }
+            is Notice.OfferEnded -> if (!uiVisible) notifications.ended(n.transfer, e::deviceName)
             is Notice.Unavailable -> {
                 notifications.removeOffer(n.id)
                 tell(getString(R.string.unavailable))
@@ -157,7 +158,28 @@ class ShareApp : Application() {
     fun uiShown(): AutoCloseable {
         visible.incrementAndGet()
         val open = AtomicBoolean(true)
-        return AutoCloseable { if (open.getAndSet(false)) visible.decrementAndGet() }
+        return AutoCloseable { if (open.getAndSet(false) && visible.decrementAndGet() == 0) announceUnseen() }
+    }
+
+    fun announce(e: Engine, t: Transfer) {
+        announced += t.id
+        notifications.offer(t, e.deviceName(t.senderId))
+    }
+
+    /** Offers that arrived while a screen was open, but maybe nobody looked. */
+    private fun announceUnseen() {
+        val e = engine.value ?: return
+        e.state.value.incoming.filter { it.id !in announced }.forEach { announce(e, it) }
+    }
+
+    /** Transfers need the foreground service to survive in the background. */
+    fun ensureService() {
+        if (engine.value?.busy != true) return
+        try {
+            TransferService.keepAlive(this)
+        } catch (_: IllegalStateException) { // not allowed from the background; it goes on as long as the process lives
+            notifications.message(getString(R.string.open_app_to_continue))
+        }
     }
 
     /** Tells the user something, wherever they are. */

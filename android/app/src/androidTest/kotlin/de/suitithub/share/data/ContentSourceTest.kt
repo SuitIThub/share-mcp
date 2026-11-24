@@ -74,6 +74,20 @@ class ContentSourceTest {
         s.release()
     }
 
+    @Test fun assetDescriptorFallsBackToTempCopy() {
+        val s = open("asset")
+        check(s)
+        s.release()
+        assertEquals(0, tempFiles())
+    }
+
+    @Test fun pipesAreOpenedOnlyOnce() {
+        val n = "once-${System.nanoTime()}.bin"
+        val s = open("pipeonce", n)
+        assertArrayEquals(TestProvider.bytes(size, n), s.openAt(0).use { it.readBytes() })
+        s.release()
+    }
+
     @Test fun parallelReadersDoNotDisturbEachOther() {
         val s = open("plain")
         val pool = Executors.newFixedThreadPool(8)

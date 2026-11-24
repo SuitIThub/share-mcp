@@ -159,8 +159,7 @@ class Receiver(
             var done = 0L
             val refs = ArrayList<String>()
             for ((n, item) in t.files.withIndex()) {
-                val part = store.part(t.id, n, item)
-                refs += part.finishedRef ?: file(n, item, part, done)
+                refs += file(n, item, store.part(t.id, n, item), done)
                 done += item.size
             }
             lan?.connectionPool?.evictAll()
@@ -170,13 +169,15 @@ class Receiver(
         private suspend fun file(n: Int, item: FileItem, part: Part, before: Long): String {
             val retry = Backoff(t)
             while (true) {
-                var have = local { part.size() }
-                if (have > item.size) {
-                    local { part.reset() }
-                    have = 0
-                }
-                if (have == item.size) return local { part.finish() }
+                var have = 0L
                 try {
+                    local { part.finishedRef }?.let { return it }
+                    have = local { part.size() }
+                    if (have > item.size) {
+                        local { part.reset() }
+                        have = 0
+                    }
+                    if (have == item.size) return local { part.finish() }
                     val base = probe()
                     val path = if (base != null) Path.LAN else Path.RELAY
                     val call = if (base != null) lanCall("$base/files/$n", have, idleTimeout) else api.relayCall(t.id, n, have, idleTimeout)
@@ -184,23 +185,32 @@ class Receiver(
                         reporter.update(before + it, path)
                         onProgress(before + it, path)
                     }
-                    if (local { part.size() } > have) retry.progressed()
+                    if (size(part) > have) retry.progressed()
                 } catch (e: OfferEndedException) {
                     throw e
                 } catch (e: DownloadFailedException) {
                     throw e
                 } catch (e: IOException) {
                     currentCoroutineContext().ensureActive()
-                    if (local { part.size() } > have) retry.progressed()
+                    if (size(part) > have) retry.progressed()
                     if (checkAlive()) retry.contact()
                     retry.pause(e)
                 }
             }
         }
 
-        /** Local storage errors are final; partial files are removed. */
+        /** For the back-off only, so a busy storage does not matter. */
+        private fun size(part: Part): Long = try {
+            part.size()
+        } catch (_: IOException) {
+            0
+        }
+
+        /** Local storage errors are final (partial files are removed), unless the storage is just busy. */
         private suspend fun <T> local(block: () -> T): T = try {
             block()
+        } catch (e: StorageBusyException) {
+            throw e
         } catch (e: IOException) {
             throw FatalException("Speichern fehlgeschlagen (Speicher voll?)", e)
         }
@@ -222,7 +232,7 @@ class Receiver(
         }
 
         private fun lanCall(url: String, offset: Long, timeout: Duration): Call {
-            val r = Request.Builder().url(url).header("Authorization", "Bearer ${acc.accessToken}")
+            val r = Request.Builder().url(url).header("Authorization", "Bearer ${acc.accessToken}").header("Accept-Encoding", "identity")
             if (offset > 0) r.header("Range", "bytes=$offset-")
             return lan!!.newBuilder().readTimeout(timeout.toJavaDuration()).build().newCall(r.build())
         }
@@ -263,12 +273,12 @@ class Receiver(
                 resp.close()
                 throw FatalException(if (changed) "Datei wurde beim Sender geändert" else "Datei ist beim Sender nicht mehr lesbar")
             }
-            resp.checkRange(offset).use { copy(it, offset, size, part, progress) }
+            resp.checkRange(offset, size).use { copy(it, offset, size, part, progress) }
         }
 
         private suspend fun copy(resp: Response, offset: Long, size: Long, part: Part, progress: (Long) -> Unit) {
             val input = resp.body.byteStream()
-            val out = local { part.append() }
+            val out = local { part.append(offset) }
             var closed = false
             try {
                 val buf = ByteArray(BUFFER)

@@ -1,5 +1,6 @@
 package de.suitithub.share.core
 
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -19,15 +20,19 @@ interface FileSource {
 /** An open offer of this device. */
 class Offer(val transfer: Transfer, val secret: ByteArray, val sources: List<FileSource>)
 
+/** The storage cannot be used right now; worth another try, unlike other storage errors. */
+class StorageBusyException(message: String, cause: Throwable? = null) : IOException(message, cause)
+
 /** One file being downloaded. Its state survives a restart of the process. */
 interface Part {
     /** Reference to the finished file, or null while it is incomplete. */
     val finishedRef: String?
 
-    /** Bytes stored so far. */
+    /** Bytes stored so far; 0 only if there really is nothing. Throws [StorageBusyException]. */
     fun size(): Long
 
-    fun append(): OutputStream
+    /** Continues at exactly this offset: anything stored behind it is cut off. Throws [StorageBusyException] if less is stored. */
+    fun append(offset: Long): OutputStream
 
     /** Drops the stored bytes. */
     fun reset()

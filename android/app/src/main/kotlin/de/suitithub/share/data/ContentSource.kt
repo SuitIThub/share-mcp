@@ -12,6 +12,7 @@ import android.webkit.MimeTypeMap
 import de.suitithub.share.core.FileItem
 import de.suitithub.share.core.FileSource
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.InputStream
 import java.time.Instant
@@ -88,8 +89,15 @@ class ContentSource private constructor(
                 val mime = cr.getType(uri)
                 val name = displayName(cr, uri, mime)
                 val type = mime ?: mimeOf(name)
-                plainFile(cr, uri)?.let { return ContentSource(it, item(name, type, it), null) }
-                return copy(context, cr, uri, name, type)
+                val pfd = try {
+                    cr.openFileDescriptor(uri, "r")
+                } catch (_: FileNotFoundException) {
+                    null // may still be readable as a stream: some providers hand out only slices of files
+                }
+                if (pfd != null && isPlainFile(pfd)) return ContentSource(pfd, item(name, type, pfd), null)
+                // read what is already open: opening a pipe again can mean another download, or fail
+                val input = if (pfd != null) ParcelFileDescriptor.AutoCloseInputStream(pfd) else cr.openInputStream(uri)
+                return copy(context, input ?: throw FileNotFoundException(), name, type)
             } catch (e: SourceException) {
                 throw e
             } catch (e: Exception) { // providers throw whatever they like
@@ -106,25 +114,17 @@ class ContentSource private constructor(
         private fun mtime(pfd: ParcelFileDescriptor): Instant =
             Os.fstat(pfd.fileDescriptor).st_mtim.let { Instant.ofEpochSecond(it.tv_sec, it.tv_nsec) }
 
-        /** The descriptor if it is a seekable regular file. */
-        private fun plainFile(cr: ContentResolver, uri: Uri): ParcelFileDescriptor? {
-            val pfd = cr.openFileDescriptor(uri, "r") ?: throw SourceException("Datei kann nicht gelesen werden")
-            val regular = try {
-                OsConstants.S_ISREG(Os.fstat(pfd.fileDescriptor).st_mode) && Os.lseek(pfd.fileDescriptor, 0, OsConstants.SEEK_CUR) >= 0
-            } catch (_: ErrnoException) {
-                false
-            }
-            if (regular) return pfd
-            pfd.close()
-            return null
+        /** Seekable regular files can be served directly. */
+        private fun isPlainFile(pfd: ParcelFileDescriptor) = try {
+            OsConstants.S_ISREG(Os.fstat(pfd.fileDescriptor).st_mode) && Os.lseek(pfd.fileDescriptor, 0, OsConstants.SEEK_CUR) >= 0
+        } catch (_: ErrnoException) {
+            false
         }
 
-        private fun copy(context: Context, cr: ContentResolver, uri: Uri, name: String, mime: String): ContentSource {
+        private fun copy(context: Context, input: InputStream, name: String, mime: String): ContentSource {
             val tmp = File(tempDir(context).apply { mkdirs() }, UUID.randomUUID().toString())
             try {
-                (cr.openInputStream(uri) ?: throw SourceException("Datei kann nicht gelesen werden")).use { input ->
-                    tmp.outputStream().use { input.copyTo(it, 256 * 1024) }
-                }
+                input.use { i -> tmp.outputStream().use { i.copyTo(it, 256 * 1024) } }
                 val pfd = ParcelFileDescriptor.open(tmp, ParcelFileDescriptor.MODE_READ_ONLY)
                 return ContentSource(pfd, item(name, mime, pfd), tmp)
             } catch (e: Throwable) {

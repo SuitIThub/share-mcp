@@ -2,6 +2,7 @@ package de.suitithub.share;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.res.AssetFileDescriptor;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
@@ -107,6 +108,13 @@ public class TestProvider extends ContentProvider {
         }
     }
 
+    /** Some providers (e.g. contacts as vCard) only hand out a slice of a file. */
+    @Override
+    public AssetFileDescriptor openAssetFile(Uri uri, String access) throws FileNotFoundException {
+        if (!mode(uri).equals("asset")) return super.openAssetFile(uri, access);
+        return new AssetFileDescriptor(ParcelFileDescriptor.open(file(uri), ParcelFileDescriptor.MODE_READ_ONLY), 0, size(uri));
+    }
+
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String access) throws FileNotFoundException {
         switch (mode(uri)) {
@@ -127,6 +135,11 @@ public class TestProvider extends ContentProvider {
             case "fresh": // restores the original content
                 write(file(uri), bytes(size(uri), uri.getLastPathSegment()));
                 break;
+            case "pipeonce":
+                synchronized (opened) {
+                    if (!opened.add(uri.toString())) throw new SecurityException("only once");
+                }
+                // fall through
             case "pipe":
                 final byte[] data = bytes(size(uri), uri.getLastPathSegment());
                 try {

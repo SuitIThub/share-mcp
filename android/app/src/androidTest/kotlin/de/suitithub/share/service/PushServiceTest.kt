@@ -121,6 +121,9 @@ class PushServiceTest {
         app.setAccount(Account("https://127.0.0.1:1", "d", "t", "n", Identity.generate("n")))
         message("offer.new", "x")
         eventually("hint") { "Neues Angebot" in TestEnv.titles() }
+        assertTrue(TestEnv.notifications.activeNotifications.single().notification.timeoutAfter in 500_000..600_000)
+        message("offer.removed", "x")
+        eventually("hint gone") { TestEnv.titles().isEmpty() }
     }
 
     @Test fun tokenIsReported() = assertTrue(runBlocking { push.onToken("token-1") })

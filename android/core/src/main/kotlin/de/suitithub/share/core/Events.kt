@@ -26,7 +26,7 @@ sealed interface ServerEvent {
     data class Relay(val request: RelayRequest) : ServerEvent
 }
 
-/** Event stream; reconnects with growing pauses (base … 30 s) until cancelled or the token is rejected. */
+/** Event stream; reconnects with growing pauses (base … 5 s) until cancelled or the token is rejected. */
 fun Api.events(backoffBase: Duration = 1.seconds): Flow<ServerEvent> = flow {
     var backoff = backoffBase
     while (true) {
@@ -43,9 +43,12 @@ fun Api.events(backoffBase: Duration = 1.seconds): Flow<ServerEvent> = flow {
             backoff = backoffBase
         }
         delay(backoff)
-        backoff = minOf(backoff * 2, 30.seconds)
+        backoff = nextPause(backoff)
     }
 }
+
+/** The server cancels our file offers after 30 s without connection, so pauses stay well below that. */
+internal fun nextPause(pause: Duration): Duration = minOf(pause * 2, 5.seconds)
 
 private fun Api.connectOnce(): Flow<ServerEvent> = callbackFlow {
     val ws = client.newWebSocket(

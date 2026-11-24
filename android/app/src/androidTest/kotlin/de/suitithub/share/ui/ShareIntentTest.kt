@@ -46,6 +46,13 @@ class ShareIntentTest {
         assertEquals(SharePayload.Files(listOf(a), ""), parse(i))
     }
 
+    /** For text shares the clip data is only a preview picture. */
+    @Test fun previewPictureOfATextIsIgnored() {
+        val i = send("text/plain").putExtra(Intent.EXTRA_TEXT, "https://x.de").putExtra(Intent.EXTRA_TITLE, "Titel")
+        i.clipData = android.content.ClipData.newRawUri("preview", a)
+        assertEquals(SharePayload.Text(Kind.LINK, "https://x.de"), parse(i))
+    }
+
     @Test fun emptyIntent() {
         for (i in listOf(send(), send("text/plain").putExtra(Intent.EXTRA_TEXT, "  "), multiple(), Intent(Intent.ACTION_MAIN), Intent(), send().putExtra(Intent.EXTRA_STREAM, "kein Uri"))) {
             assertEquals(SharePayload.Empty, parse(i))

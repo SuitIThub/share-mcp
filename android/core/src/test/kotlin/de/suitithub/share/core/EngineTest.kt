@@ -355,16 +355,77 @@ class EngineTest {
 
     @Test fun staleParts() = runBlocking {
         val item = FileItem("x", 100)
-        store.part("old", 0, item).append().use { it.write(1) }
+        store.part("old", 0, item).append(0).use { it.write(1) }
         go.stop()
         runCatching { e.refresh() }
         assertEquals(1, store.leftovers().size)
         go.restart()
         val t = a.createTransfer(CreateTransferRequest(Kind.FILES, files = listOf(item), targets = listOf("Tablet"), broadcast = false)).transfer
         Api(acc).accept(t.id)
-        store.part(t.id, 0, item).append().use { it.write(1) }
+        store.part(t.id, 0, item).append(0).use { it.write(1) }
         e.refresh()
         assertEquals(listOf("${t.id}-0.part"), store.leftovers())
+    }
+
+    @Test fun outcomeOfOwnOffersStaysVisibleUntilDismissed() = runBlocking {
+        connected()
+        val peer = pixel()
+        val f = file(1000)
+        val t1 = e.offerFiles(listOf(f), listOf("Pixel"), false)
+        eventually("seen") { peer.state.value.incoming.isNotEmpty() }
+        peer.accept(t1.id)
+        eventually("delivered") { e.state.value.sent.singleOrNull()?.deliveries?.single()?.status == Status.DELIVERED }
+        assertTrue(e.state.value.outgoing.isEmpty())
+        eventually("notice") { notices.filterIsInstance<Notice.OfferEnded>().single().transfer.id == t1.id }
+        eventually("idle") { !e.hasWork.value }
+
+        val t2 = e.offerText(Kind.TEXT, "x", listOf("Pixel"), false)
+        eventually("seen") { peer.state.value.incoming.isNotEmpty() }
+        peer.decline(t2.id)
+        eventually("declined") { e.state.value.sent.map { it.id } == listOf(t1.id, t2.id) && e.state.value.sent[1].deliveries.single().status == Status.DECLINED }
+        e.dismiss(t1.id)
+        assertEquals(listOf(t2.id), e.state.value.sent.map { it.id })
+    }
+
+    @Test fun cancelledOwnOffersLeaveNoRow() = runBlocking {
+        connected()
+        val t = e.offerText(Kind.TEXT, "x", listOf("Pixel"), false)
+        e.cancelOutgoing(t.id)
+        delay(300)
+        assertTrue(e.state.value.sent.isEmpty())
+        assertFalse(notices.any { it is Notice.OfferEnded })
+    }
+
+    @Test fun offersTheServerCancelledWhileOfflineAreReported() = runBlocking {
+        connected()
+        val f = file(10)
+        val t = e.offerFiles(listOf(f), listOf("Pixel"), false)
+        go.stop()
+        eventually("disconnected") { !e.state.value.connected }
+        go.restart()
+        Api(a.account).decline(t.id) // ends it before the engine is back
+        eventually("reported") { e.state.value.sent.singleOrNull()?.id == t.id }
+    }
+
+    @Test fun acceptedTextsStayVisibleUntilDismissed() = runBlocking {
+        connected()
+        val t = offerText("https://example.org", Kind.LINK)
+        eventually("arrived") { e.state.value.incoming.isNotEmpty() }
+        e.accept(t.id)
+        assertEquals(listOf("https://example.org"), e.state.value.received.map { it.text })
+        e.dismiss(t.id)
+        assertTrue(e.state.value.received.isEmpty())
+    }
+
+    @Test fun closingLeavesNothingRunning() = runBlocking {
+        connected()
+        e.offerFiles(listOf(file(10)), listOf("Pixel"), false)
+        val t = pixel().offerFiles(listOf(SlowSource(file(5_000_000, "slow"), 50_000, 20)), listOf("Tablet"), false)
+        e.accept(t.id)
+        eventually("busy") { e.state.value.downloads.isNotEmpty() && e.state.value.outgoing.isNotEmpty() }
+        e.close()
+        assertFalse(e.busy)
+        assertEquals(EngineState(), e.state.value)
     }
 
     @Test fun expiredOffersLeaveIncomingWithoutServer() = runBlocking {

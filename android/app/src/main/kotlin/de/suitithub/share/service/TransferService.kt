@@ -23,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -35,6 +36,9 @@ class TransferService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var operations = 0
     private var lastStartId = 0
+
+    /** The system does not let us run (any longer); only opening the app helps. */
+    private var refused = false
     private var watching: Job? = null
     private var engine: Engine? = null
     private var held: AutoCloseable? = null
@@ -46,6 +50,7 @@ class TransferService : Service() {
     override fun onCreate() {
         super.onCreate()
         running = true
+        starts++
         wake = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "share:transfer").apply { acquire(MAX_WAKE_MS) }
         @Suppress("DEPRECATION") // the low latency mode works only with the screen on
         wifi = applicationContext.getSystemService(WifiManager::class.java).createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "share:transfer").apply { acquire() }
@@ -59,10 +64,12 @@ class TransferService : Service() {
                 this, Notifications.PROGRESS, shareApp.notifications.progress(e?.state?.value ?: EngineState()), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } catch (ex: IllegalStateException) { // not allowed from the background (any more)
+            refused = true
             shareApp.tell(getString(R.string.open_app_to_continue))
             stopSelf(startId)
             return START_NOT_STICKY
         }
+        shareApp.notifications.removeMessage(getString(R.string.open_app_to_continue))
         if (e == null) {
             stopIfIdle()
             return START_NOT_STICKY
@@ -127,6 +134,7 @@ class TransferService : Service() {
         engine = e
         held = e.hold()
         watching = scope.launch {
+            launch { shareApp.engine.first { it !== e }.let { new -> scope.launch { engineChanged(new) } } }
             launch { e.hasWork.collect { if (!it) stopIfIdle() } }
             var shown: EngineState? = null
             while (true) {
@@ -140,6 +148,18 @@ class TransferService : Service() {
         }
     }
 
+    /** The device was unpaired or paired again: the old engine's transfers are over. */
+    private fun engineChanged(new: Engine?) {
+        if (new != null) {
+            watch(new)
+        } else {
+            watching?.cancel()
+            held?.close()
+            engine = null
+        }
+        stopIfIdle()
+    }
+
     private fun stopIfIdle() {
         val e = shareApp.engine.value
         if (operations > 0 || (e != null && e === engine && e.busy)) return
@@ -149,6 +169,7 @@ class TransferService : Service() {
 
     /** Android 15+ limits data sync services to some hours a day. */
     override fun onTimeout(startId: Int, fgsType: Int) {
+        refused = true
         shareApp.tell(getString(R.string.open_app_to_continue))
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -161,6 +182,8 @@ class TransferService : Service() {
         wake?.let { if (it.isHeld) it.release() }
         wifi?.let { if (it.isHeld) it.release() }
         super.onDestroy()
+        // work may have begun while the service was already stopping
+        if (!refused) shareApp.ensureService()
     }
 
     companion object {
@@ -173,6 +196,10 @@ class TransferService : Service() {
         private const val MAX_WAKE_MS = 6 * 60 * 60 * 1000L
 
         @Volatile var running = false
+            private set
+
+        /** How often the service was created (tests). */
+        @Volatile var starts = 0
             private set
 
         private fun intent(context: Context, action: String, id: String) =
@@ -189,7 +216,11 @@ class TransferService : Service() {
                 .putStringArrayListExtra(TARGETS, ArrayList(targets)).putExtra(BROADCAST, broadcast).putExtra(MESSAGE, message)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             i.clipData = clip
-            context.startForegroundService(i)
+            try {
+                context.startForegroundService(i)
+            } catch (_: SecurityException) { // an item we were never given access to
+                context.shareApp.tell(context.getString(R.string.send_failed), context.getString(R.string.share_rejected))
+            }
         }
 
         /** Makes sure the service runs while the engine has work. */

@@ -87,7 +87,8 @@ class Api(val account: Account, baseClient: OkHttpClient = OkHttpClient()) {
     suspend fun fail(id: String) = http.unit("POST", "/v1/transfers/$id/fail")
 
     internal fun relayCall(id: String, n: Int, offset: Long, readTimeout: Duration = 30.seconds): Call {
-        val r = http.request("/v1/transfers/$id/files/$n")
+        // no transparent compression: the length of the answer must be known
+        val r = http.request("/v1/transfers/$id/files/$n").header("Accept-Encoding", "identity")
         if (offset > 0) r.header("Range", "bytes=$offset-")
         return http.streaming.newBuilder().readTimeout(readTimeout.toJavaDuration()).build().newCall(r.build())
     }
@@ -136,6 +137,7 @@ internal class Http(private val base: String, private val token: String?, baseCl
     private val calls = client.newBuilder().callTimeout(30, TimeUnit.SECONDS).build()
     val streaming: OkHttpClient = client.newBuilder()
         .retryOnConnectionFailure(false)
+        .followRedirects(false)
         .readTimeout(5, TimeUnit.MINUTES) // an upload is answered only after the receiver has taken everything
         .writeTimeout(1, TimeUnit.MINUTES)
         .build()
@@ -208,10 +210,16 @@ internal fun Response.check(): Response {
     throw ApiException(code, msg?.takeIf { it.isNotBlank() } ?: "HTTP $code")
 }
 
-/** Accepts 200 for a full and 206 for a resumed download. */
-internal fun Response.checkRange(offset: Long): Response {
+/**
+ * Accepts 200 for a full and 206 for a resumed download, and only if the answer covers exactly the missing bytes:
+ * a proxy's error or login page answered with 200 must never become part of a file.
+ */
+internal fun Response.checkRange(offset: Long, size: Long? = null): Response {
     check()
-    if (code == (if (offset > 0) 206 else 200)) return this
+    val ok = code == (if (offset > 0) 206 else 200) &&
+        (size == null || body.contentLength() == size - offset) &&
+        (offset == 0L || header("Content-Range")?.startsWith("bytes $offset-") == true)
+    if (ok) return this
     close()
-    throw IOException("unexpected status $code for offset $offset")
+    throw IOException("unexpected answer $code (${body.contentLength()} bytes, ${header("Content-Range")}) for offset $offset of $size")
 }

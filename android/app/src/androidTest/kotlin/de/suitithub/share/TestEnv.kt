@@ -60,7 +60,7 @@ object TestEnv {
     fun eventually(what: String, seconds: Int = 15, cond: () -> Boolean) {
         val end = System.nanoTime() + seconds * 1_000_000_000L
         while (!cond()) {
-            if (System.nanoTime() > end) throw AssertionError("timeout: $what; ${titles()} ${app.engine.value?.state?.value}")
+            if (System.nanoTime() > end) throw AssertionError("timeout: $what; ${titles()} ${notifications.activeNotifications.map { it.notification.extras.getCharSequence(Notification.EXTRA_TEXT) }} ${app.engine.value?.state?.value}")
             Thread.sleep(30)
         }
     }
@@ -103,7 +103,12 @@ object TestEnv {
             private val buf get() = parts.getOrPut("$transferId-$index") { ByteArrayOutputStream() }
             override val finishedRef: String? get() = null
             override fun size() = buf.size().toLong()
-            override fun append(): OutputStream = buf
+            override fun append(offset: Long): OutputStream {
+                val keep = buf.toByteArray().copyOf(offset.toInt())
+                buf.reset()
+                buf.write(keep)
+                return buf
+            }
             override fun reset() = buf.reset()
             override fun finish(): String {
                 files[item.name] = buf.toByteArray()

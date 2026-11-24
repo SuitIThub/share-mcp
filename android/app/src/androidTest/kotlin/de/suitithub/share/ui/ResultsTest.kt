@@ -127,7 +127,7 @@ class ResultsTest {
         val store = de.suitithub.share.data.MediaStoreDownloads(ctx, "results-test")
         val apk = java.io.File(ctx.applicationInfo.sourceDir)
         val part = store.part("apk", 0, FileItem("selbst.apk", apk.length()))
-        part.append().use { o -> apk.inputStream().use { it.copyTo(o) } }
+        part.append(0).use { o -> apk.inputStream().use { it.copyTo(o) } }
         val ref = part.finish()
         store.forget("apk")
         val d = done("selbst.apk").copy(refs = listOf(ref))

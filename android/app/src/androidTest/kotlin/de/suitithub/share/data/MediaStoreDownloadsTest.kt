@@ -37,7 +37,7 @@ class MediaStoreDownloadsTest {
 
     private fun download(name: String, data: ByteArray = bytes, tid: String = "t1", n: Int = 0): String {
         val p = store().part(tid, n, FileItem(name, data.size.toLong(), "text/html"))
-        p.append().use { it.write(data) }
+        p.append(0).use { it.write(data) }
         return p.finish()
     }
 
@@ -45,19 +45,19 @@ class MediaStoreDownloadsTest {
         val item = FileItem("mstest.bin", 5000)
         val p = store().part("t1", 0, item)
         assertEquals(0L, p.size())
-        p.append().use { it.write(bytes, 0, 1000) }
+        p.append(0).use { it.write(bytes, 0, 1000) }
         assertEquals(1000L, p.size())
         val q = store().part("t1", 0, item)
         assertEquals(1000L, q.size())
         assertNull(q.finishedRef)
-        q.append().use { it.write(bytes, 1000, 4000) }
+        q.append(1000).use { it.write(bytes, 1000, 4000) }
         assertArrayEquals(bytes, content(q.finish()))
         assertEquals(listOf("Download/mstest.bin"), names())
     }
 
     @Test fun pendingIsInvisibleUntilFinish() {
         val p = store().part("t1", 0, FileItem("mstest.txt", 5000))
-        p.append().use { it.write(bytes) }
+        p.append(0).use { it.write(bytes) }
         assertEquals(emptyList<String>(), names())
         p.finish()
         assertEquals(listOf("Download/mstest.txt"), names())
@@ -75,13 +75,37 @@ class MediaStoreDownloadsTest {
     @Test fun twoPendingWithTheSameNameBothSurvive() {
         val p = store().part("t1", 0, FileItem("mstest.txt", 1))
         val q = store().part("t1", 1, FileItem("mstest.txt", 1))
-        p.append().use { it.write(1) }
-        q.append().use { it.write(2) }
+        p.append(0).use { it.write(1) }
+        q.append(0).use { it.write(2) }
         val r1 = p.finish()
         val r2 = q.finish()
         assertEquals(1, content(r1)[0].toInt())
         assertEquals(2, content(r2)[0].toInt())
         assertEquals(2, names().size)
+    }
+
+    @Test fun manyDownloadsOfTheSameName() {
+        val refs = (1..40).map { download("mstest.apk", "$it".toByteArray(), "t$it") }
+        assertEquals(40, refs.toSet().size)
+        assertEquals(40, names().size)
+        assertEquals((1..40).map { "$it" }, refs.map { content(it).decodeToString() })
+        assertTrue(names().toString(), names().all { it.endsWith(".apk") })
+    }
+
+    @Test fun appendCutsOffWhatIsBehindTheOffset() {
+        val p = store().part("t1", 0, FileItem("mstest.txt", 3))
+        p.append(0).use { it.write("abcdef".toByteArray()) }
+        p.append(2).use { it.write("X".toByteArray()) }
+        assertEquals(3L, p.size())
+        assertEquals("abX", content(p.finish()).decodeToString())
+    }
+
+    @Test fun appendBehindTheEndIsRefused() {
+        val p = store().part("t1", 0, FileItem("mstest.txt", 9))
+        p.append(0).use { it.write("abc".toByteArray()) }
+        org.junit.Assert.assertThrows(de.suitithub.share.core.StorageBusyException::class.java) { p.append(4) }
+        assertEquals(3L, p.size())
+        org.junit.Assert.assertThrows(de.suitithub.share.core.StorageBusyException::class.java) { store().part("t9", 0, FileItem("mstest9.txt", 9)).append(4) }
     }
 
     @Test fun apkKeepsNameAndMime() {
@@ -127,9 +151,9 @@ class MediaStoreDownloadsTest {
     )!!.use { it.count }
 
     @Test fun forgetRemovesOnlyThatOffer() {
-        store().part("t1", 0, FileItem("mstest1.txt", 9)).append().use { it.write(1) }
-        store().part("t2", 0, FileItem("mstest2.txt", 9)).append().use { it.write(1) }
-        store().part("t1b", 0, FileItem("mstest3.txt", 9)).append().use { it.write(1) }
+        store().part("t1", 0, FileItem("mstest1.txt", 9)).append(0).use { it.write(1) }
+        store().part("t2", 0, FileItem("mstest2.txt", 9)).append(0).use { it.write(1) }
+        store().part("t1b", 0, FileItem("mstest3.txt", 9)).append(0).use { it.write(1) }
         assertEquals(3, pendingCount())
         store().forget("t1")
         assertEquals(2, pendingCount())
@@ -140,20 +164,20 @@ class MediaStoreDownloadsTest {
 
     @Test fun resetStartsOver() {
         val p = store().part("t1", 0, FileItem("mstest.txt", 2))
-        p.append().use { it.write(bytes) }
+        p.append(0).use { it.write(bytes) }
         p.reset()
         assertEquals(0L, p.size())
-        p.append().use { it.write("ok".toByteArray()) }
+        p.append(0).use { it.write("ok".toByteArray()) }
         assertEquals("ok", content(p.finish()).decodeToString())
     }
 
     @Test fun staleStateWithDeletedRowRestarts() {
         val item = FileItem("mstest.txt", 5000)
-        store().part("t1", 0, item).append().use { it.write(bytes, 0, 100) }
+        store().part("t1", 0, item).append(0).use { it.write(bytes, 0, 100) }
         cr.delete(MediaStore.setIncludePending(MediaStore.Downloads.EXTERNAL_CONTENT_URI), "${MediaStore.Downloads.DISPLAY_NAME} LIKE 'mstest%'", null)
         val p = store().part("t1", 0, item)
         assertEquals(0L, p.size())
-        p.append().use { it.write(bytes) }
+        p.append(0).use { it.write(bytes) }
         assertArrayEquals(bytes, content(p.finish()))
         assertTrue(names().isNotEmpty())
     }

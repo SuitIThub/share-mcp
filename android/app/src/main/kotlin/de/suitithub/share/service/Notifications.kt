@@ -97,10 +97,33 @@ class Notifications(private val context: Context) {
         post("r:" + t.id, RESULT, b.build())
     }
 
-    fun unavailable() = message(context.getString(R.string.unavailable))
+    fun unavailable() = message(context.getString(R.string.unavailable), timeoutMs = 60_000)
 
-    fun message(title: String, text: String = "") =
-        post(null, MESSAGE, builder(RESULTS).setAutoCancel(true).setContentTitle(title).setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text)).setTimeoutAfter(60_000).build())
+    /** Each distinct message has its own notification; failures stay until dismissed. */
+    fun message(title: String, text: String = "", tag: String = "m:$title:$text", timeoutMs: Long = 0) {
+        val b = builder(RESULTS).setAutoCancel(true).setContentTitle(title).setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
+        if (timeoutMs > 0) b.setTimeoutAfter(timeoutMs)
+        post(tag, MESSAGE, b.build())
+    }
+
+    fun removeMessage(title: String, text: String = "") = nm.cancel("m:$title:$text", MESSAGE)
+
+    /** An offer we know nothing about yet; it lives at most ten minutes. */
+    fun hint(id: String) = message(context.getString(R.string.new_offer), context.getString(R.string.open_app), "hint:$id", 10 * 60_000L)
+
+    fun removeHint(id: String) = nm.cancel("hint:$id", MESSAGE)
+
+    /** How one of our own offers ended. */
+    fun ended(t: Transfer, name: (String) -> String) {
+        val text = t.deliveries.joinToString("\n") { "${name(it.deviceId)}: ${Format.status(it.status, it.path)}" }
+        post(
+            "e:" + t.id, RESULT,
+            builder(RESULTS).setAutoCancel(true)
+                .setContentTitle(context.getString(R.string.offer_ended, Format.shortName(t)))
+                .setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .build(),
+        )
+    }
 
     /** The foreground service's notification. */
     fun progress(s: EngineState): Notification {

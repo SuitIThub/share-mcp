@@ -1,6 +1,7 @@
 package de.suitithub.share.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
                 shareApp.engine.collectLatest { e ->
                     if (e == null) return@collectLatest
                     askForNotifications()
+                    shareApp.ensureService()
                     shareApp.uiShown().use { e.hold().use { awaitCancellation() } }
                 }
             }
@@ -104,6 +106,18 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun openSettings() = settings()
+        override fun openLink(url: String) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (_: ActivityNotFoundException) {
+                shareApp.tell(getString(R.string.cannot_open_link))
+            }
+        }
+
+        override fun copy(text: String) {
+            shareApp.copy(text)
+            shareApp.tell(getString(R.string.copied))
+        }
     }
 
     @Composable
