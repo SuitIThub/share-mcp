@@ -4,4 +4,10 @@
 *.db-*
 .remember/
 .superpowers/
-
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+android/keystore.properties
+android/app/google-services.json
+*.jks

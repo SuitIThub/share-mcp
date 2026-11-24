@@ -5,6 +5,7 @@ Privates „Quick Share übers Internet“: Text, Links und Dateien zwischen eig
 - Design: `docs/superpowers/specs/2026-11-23-share-design.md`
 - Protokoll (für Apps): `docs/protocol.md`
 - Server betreiben: `docs/deploy/README.md`
+- Android-App: `docs/android.md`
 
 ## Bauen
 
