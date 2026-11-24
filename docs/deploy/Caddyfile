@@ -1,0 +1,12 @@
+# Ersetze share.example.com durch die von playit vergebene Adresse.
+share.example.com {
+	# Große Relay-Ströme und WebSockets: keine Größenbegrenzung, kein Puffern.
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+		transport http {
+			read_timeout 0
+			write_timeout 0
+			response_header_timeout 30s
+		}
+	}
+}

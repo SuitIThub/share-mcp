@@ -1,0 +1,18 @@
+[Unit]
+Description=share broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=share
+Group=share
+ExecStart=/usr/local/bin/share-server -config /etc/share-server/config.toml serve
+Restart=on-failure
+StateDirectory=share-server
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/share-server
+
+[Install]
+WantedBy=multi-user.target
