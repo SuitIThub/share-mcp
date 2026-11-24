@@ -7,6 +7,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import java.security.MessageDigest
+import java.time.DateTimeException
 import java.time.Instant
 import java.time.OffsetDateTime
 import javax.crypto.Mac
@@ -35,7 +37,11 @@ const val MAX_TEXT_BYTES = 65536
 object InstantSerializer : KSerializer<Instant> {
     override val descriptor = PrimitiveSerialDescriptor("Instant", PrimitiveKind.STRING)
     override fun serialize(encoder: Encoder, value: Instant) = encoder.encodeString(value.toString())
-    override fun deserialize(decoder: Decoder): Instant = OffsetDateTime.parse(decoder.decodeString()).toInstant()
+    override fun deserialize(decoder: Decoder): Instant = try {
+        OffsetDateTime.parse(decoder.decodeString()).toInstant()
+    } catch (e: DateTimeException) {
+        throw SerializationException("invalid time", e)
+    }
 }
 
 @Serializable

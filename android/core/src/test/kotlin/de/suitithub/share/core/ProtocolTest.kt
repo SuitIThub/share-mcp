@@ -51,6 +51,12 @@ class ProtocolTest {
         for (bad in listOf("", ".", "d1.zz", "d1.", ".abcd", "d1.9c4")) assertNull(bad, AccessToken.verify(secret, "t1", bad))
     }
 
+    @Test fun brokenTimeIsASerializationError() {
+        org.junit.Assert.assertThrows(kotlinx.serialization.SerializationException::class.java) {
+            ShareJson.decodeFromString<PairCodeResponse>("""{"code":"A","expires_at":"gestern"}""")
+        }
+    }
+
     @Test fun finalStatuses() {
         val final = setOf(Status.DELIVERED, Status.DECLINED, Status.MISSED, Status.CANCELLED, Status.FAILED)
         for (s in Status.entries) if (s in final) assertTrue("$s", s.isFinal) else assertFalse("$s", s.isFinal)
