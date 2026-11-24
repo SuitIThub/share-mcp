@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +33,8 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -44,6 +47,7 @@ class ShareApp : Application() {
     private lateinit var store: SecureStore
     private val _engine = MutableStateFlow<Engine?>(null)
     private var observer: Job? = null
+    private var account: Account? = null
     private val visible = AtomicInteger()
 
     /** Null while the device is not paired. */
@@ -63,7 +67,33 @@ class ShareApp : Application() {
         start(a)
     }
 
+    val deviceName: String get() = account?.name.orEmpty()
+
+    /** Renames this device on the server; throws IOException. */
+    suspend fun rename(e: Engine, name: String) {
+        e.api.updateMe(name = name)
+        synchronized(this) {
+            val a = account ?: return
+            account = a.copy(name = name).also { store.save(it) }
+        }
+    }
+
+    /** Ends the pairing, even if the server cannot be told. */
+    fun unpair(e: Engine) {
+        scope.launch {
+            try {
+                withTimeout(5_000) { e.api.deleteMe() }
+            } catch (_: IOException) {
+                tell(getString(R.string.unpair_offline))
+            } catch (_: TimeoutCancellationException) {
+                tell(getString(R.string.unpair_offline))
+            }
+            setAccount(null)
+        }
+    }
+
     @Synchronized private fun start(a: Account?) {
+        account = a
         observer?.cancel()
         _engine.value?.close()
         val e = a?.let { Engine(Api(it), MediaStoreDownloads(this), scope) }
