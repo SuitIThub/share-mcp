@@ -27,7 +27,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -60,7 +60,7 @@ fun PairScreen(prefill: PairUri?, hint: String?, onPaired: suspend (Account) -> 
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
+    val res = LocalResources.current
 
     fun fill(u: PairUri) {
         url = u.url
@@ -70,7 +70,7 @@ fun PairScreen(prefill: PairUri?, hint: String?, onPaired: suspend (Account) -> 
     LaunchedEffect(prefill) { prefill?.let { fill(it) } }
     val scan = rememberLauncherForActivityResult(ScanContract()) { result ->
         val text = result.contents ?: return@rememberLauncherForActivityResult
-        PairUri.parse(text)?.let { fill(it) } ?: run { error = context.getString(R.string.not_a_pair_code) }
+        PairUri.parse(text)?.let { fill(it) } ?: run { error = res.getString(R.string.not_a_pair_code) }
     }
 
     Column(
@@ -105,20 +105,20 @@ fun PairScreen(prefill: PairUri?, hint: String?, onPaired: suspend (Account) -> 
                 scope.launch {
                     try {
                         val acc = withContext(Dispatchers.Default) {
-                            pair(url, code, name.trim(), Identity.generate(name), allowInsecureLocal = BuildConfig.DEBUG)
+                            pair(url, code, name.trim(), Identity.generate(name), allowInsecureLocal = BuildConfig.ALLOW_LOCAL_HTTP)
                         }
                         onPaired(acc)
                     } catch (e: IllegalArgumentException) {
-                        error = context.getString(R.string.bad_address)
+                        error = res.getString(R.string.bad_address)
                     } catch (e: ApiException) {
                         error = when (e.status) {
-                            403 -> context.getString(R.string.bad_code)
-                            409 -> context.getString(R.string.name_taken)
-                            400 -> context.getString(R.string.bad_name)
-                            else -> context.getString(R.string.server_refused, e.message)
+                            403 -> res.getString(R.string.bad_code)
+                            409 -> res.getString(R.string.name_taken)
+                            400 -> res.getString(R.string.bad_name)
+                            else -> res.getString(R.string.server_refused, e.message)
                         }
                     } catch (e: IOException) {
-                        error = context.getString(R.string.server_unreachable)
+                        error = res.getString(R.string.server_unreachable)
                     } finally {
                         busy = false
                     }

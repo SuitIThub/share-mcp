@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,7 @@ import java.io.IOException
 fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
+    val res = LocalResources.current
     val app = context.shareApp
     val scope = rememberCoroutineScope()
     var name by rememberSaveable { mutableStateOf(app.deviceName) }
@@ -64,9 +66,9 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
             try {
                 block()
             } catch (e: ApiException) {
-                message = if (e.status == 409) context.getString(R.string.name_taken) else context.getString(R.string.server_refused, e.message)
+                message = if (e.status == 409) res.getString(R.string.name_taken) else res.getString(R.string.server_refused, e.message)
             } catch (e: IOException) {
-                message = context.getString(R.string.no_connection)
+                message = res.getString(R.string.no_connection)
             }
         }
     }
@@ -85,7 +87,7 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 name, { if (it.toByteArray().size <= 64) name = it }, Modifier.weight(1f).testTag("deviceName"),
                 label = { Text(stringResource(R.string.device_name)) }, singleLine = true,
             )
-            Button(enabled = name.isNotBlank() && name.trim() != app.deviceName, onClick = { run { app.rename(engine, name.trim()); message = context.getString(R.string.saved) } }, modifier = Modifier.testTag("rename")) {
+            Button(enabled = name.isNotBlank() && name.trim() != app.deviceName, onClick = { run { app.rename(engine, name.trim()); message = res.getString(R.string.saved) } }, modifier = Modifier.testTag("rename")) {
                 Text(stringResource(R.string.save))
             }
         }

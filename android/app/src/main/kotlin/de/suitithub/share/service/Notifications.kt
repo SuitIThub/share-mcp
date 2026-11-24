@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import de.suitithub.share.R
@@ -17,6 +18,7 @@ import de.suitithub.share.core.Phase
 import de.suitithub.share.core.Transfer
 import de.suitithub.share.ui.Format
 import de.suitithub.share.ui.MainActivity
+import de.suitithub.share.ui.Results
 import java.time.Duration
 import java.time.Instant
 
@@ -42,6 +44,8 @@ class Notifications(private val context: Context) {
     private fun builder(channel: String) = NotificationCompat.Builder(context, channel)
         .setSmallIcon(R.drawable.ic_stat)
         .setContentIntent(PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), FLAGS))
+
+    private fun activity(i: Intent) = PendingIntent.getActivity(context, 0, i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), FLAGS)
 
     fun offer(t: Transfer, sender: String) {
         val left = Duration.between(Instant.now(), t.expiresAt).toMillis()
@@ -72,6 +76,9 @@ class Notifications(private val context: Context) {
         if (d.phase == Phase.DONE) {
             b.setContentTitle(context.getString(R.string.received, name))
             b.setContentText(listOf(Format.size(d.transfer.totalSize), Format.path(d.path)).filter { it.isNotEmpty() }.joinToString(" · "))
+            val open = activity(Results.openIntent(d))
+            b.setContentIntent(open)
+            if (Results.isApk(d)) b.addAction(0, context.getString(R.string.install), open)
         } else {
             b.setContentTitle(context.getString(R.string.failed, name))
             b.setContentText(d.error.orEmpty())
@@ -84,6 +91,9 @@ class Notifications(private val context: Context) {
         val b = builder(RESULTS).setAutoCancel(true)
             .setContentTitle(context.getString(if (t.kind == Kind.LINK) R.string.link_copied else R.string.text_copied, sender))
             .setContentText(Format.offerBody(t))
+        if (t.kind == Kind.LINK && Format.isWebLink(t.text)) {
+            b.addAction(0, context.getString(R.string.open), activity(Intent(Intent.ACTION_VIEW, Uri.parse(t.text))))
+        }
         post("r:" + t.id, RESULT, b.build())
     }
 
