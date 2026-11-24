@@ -25,14 +25,16 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
-fun testEngine(api: Api, store: DownloadStore, scope: CoroutineScope, now: () -> Instant = Instant::now) = Engine(
+fun testEngine(api: Api, store: DownloadStore, scope: CoroutineScope, deviceRefresh: Duration = 1.hours, now: () -> Instant = Instant::now) = Engine(
     api, store, scope,
     EngineOptions(
         endpointPort = 0, candidates = { listOf("127.0.0.1:$it") }, probeTimeout = 500.milliseconds, idleTimeout = 5.seconds,
-        backoffBase = 20.milliseconds, linger = 50.milliseconds, tick = 50.milliseconds, now = now,
+        backoffBase = 20.milliseconds, linger = 50.milliseconds, tick = 50.milliseconds, deviceRefresh = deviceRefresh, now = now,
     ),
 )
 
@@ -105,6 +107,26 @@ class EngineTest {
         val bot = a.devices().single { it.name == "Bot" }
         assertEquals("Bot", e.deviceName(bot.id))
         assertEquals("Unbekanntes Gerät", e.deviceName("nope"))
+    }
+
+    @Test fun newDevicesAndOnlineStateAppearWhileWatching() = runBlocking {
+        e.close()
+        e = testEngine(Api(acc), store, scope, deviceRefresh = 100.milliseconds)
+        connected()
+        assertFalse(e.state.value.devices.single().online)
+        pixel()
+        eventually("online") { e.state.value.devices.single { it.name == "Pixel" }.online }
+        go.account("Desk")
+        eventually("new device") { e.state.value.devices.map { it.name } == listOf("Desk", "Pixel") }
+    }
+
+    @Test fun unknownReceiversGetNames() = runBlocking {
+        connected()
+        val late = Api(go.account("Late"))
+        e.offerText(Kind.TEXT, "x", emptyList(), true)
+        eventually("late sees it") { late.incoming().isNotEmpty() }
+        late.decline(late.incoming().single().id)
+        eventually("name known") { e.deviceName(late.account.deviceId) == "Late" }
     }
 
     @Test fun incomingAppearsAndDisappears() = runBlocking {

@@ -86,6 +86,8 @@ class EngineOptions(
     /** how long the connection stays open after the last holder is gone */
     val linger: Duration = 2.seconds,
     val tick: Duration = 1.seconds,
+    /** how often the device list is reloaded while someone is watching */
+    val deviceRefresh: Duration = 15.seconds,
     val now: () -> Instant = Instant::now,
 )
 
@@ -140,11 +142,23 @@ class Engine(
                     }
                 }
         }
+        scope.launch { watchDevices() }
         scope.launch {
             while (true) {
                 delay(opts.tick)
                 expire()
             }
+        }
+    }
+
+    private fun learnName(id: String) {
+        if (id !in _state.value.names) scope.launch { runCatchingIo { loadDevices() } }
+    }
+
+    private suspend fun watchDevices() {
+        while (true) {
+            delay(opts.deviceRefresh)
+            if (holders.value > 0 && _state.value.connected) runCatchingIo { loadDevices() }
         }
     }
 
@@ -173,10 +187,11 @@ class Engine(
             ServerEvent.Disconnected -> _state.update { it.copy(connected = false) }
             ServerEvent.Unauthorised -> _state.update { it.copy(connected = false, unauthorised = true) }
             is ServerEvent.OfferNew -> {
-                if (e.transfer.senderId !in _state.value.names) scope.launch { runCatchingIo { loadDevices() } }
+                learnName(e.transfer.senderId)
                 arrive(e.transfer, notify = true)
             }
             is ServerEvent.OfferRemoved -> leave(e.id)
+            is ServerEvent.DeliveryUpdated -> learnName(e.update.delivery.deviceId)
             else -> Unit
         }
     }
@@ -416,6 +431,9 @@ class Engine(
             sender.offers.value.values.filter { it.expiresAt < limit }.forEach { sender.drop(it.id) }
         }
     }
+
+    /** Simulates losing the local path (tests). */
+    internal fun loseLanForTest() = sender.stopEndpointForTest()
 
     /** Ends everything locally. Running downloads keep their partial state. */
     fun close() {
