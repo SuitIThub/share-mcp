@@ -46,3 +46,11 @@ tasks.test {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
 }
+
+// a Kotlin device for the Windows client's interop tests
+tasks.register<JavaExec>("peer") {
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass = "de.suitithub.share.core.PeerMainKt"
+    args = providers.environmentVariable("PEER_ARGS").getOrElse("").split("|")
+    defaultCharacterEncoding = "UTF-8"
+}
