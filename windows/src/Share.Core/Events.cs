@@ -28,12 +28,31 @@ public sealed class EventOptions
     /// <summary>Ping interval and how long an answer may take.</summary>
     public TimeSpan KeepAlive { get; init; } = TimeSpan.FromSeconds(15);
 
+    /// <summary>Drops the current connection, if any, and connects anew without waiting, e.g. after waking up.</summary>
+    public void Reconnect()
+    {
+        RetryNow();
+        try
+        {
+            _connection?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // has just ended by itself
+        }
+    }
+
+    private volatile CancellationTokenSource? _connection;
+
+    internal CancellationTokenSource NewConnection(CancellationToken ct) => _connection = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
     /// <summary>Ends the current pause, e.g. after waking up or when a network appears.</summary>
     public void RetryNow() => Interlocked.Exchange(ref _retry, new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
 
-    internal async Task PauseAsync(TimeSpan t, CancellationToken ct)
+    internal Task RetrySignal => _retry.Task;
+
+    internal static async Task PauseAsync(TimeSpan t, Task retry, CancellationToken ct)
     {
-        var retry = _retry.Task;
         await Task.WhenAny(Task.Delay(t, ct), retry).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
     }
@@ -57,11 +76,13 @@ public static class EventStream
             ws.Options.KeepAliveInterval = options.KeepAlive;
             ws.Options.KeepAliveTimeout = options.KeepAlive;
             ws.Options.CollectHttpResponseDetails = true;
+            using var connection = options.NewConnection(ct);
+            var retry = options.RetrySignal; // taken early: a wish to reconnect during the connection must not be missed
             if (await ConnectAsync(ws, api.EventsUri, ct).ConfigureAwait(false))
             {
                 pause = options.BackoffBase;
                 yield return new ServerEvent.Connected();
-                while (await ReceiveAsync(ws, ct).ConfigureAwait(false) is { } text)
+                while (await ReceiveAsync(ws, connection.Token, ct).ConfigureAwait(false) is { } text)
                     if (Parse(text) is { } e)
                         yield return e;
                 yield return new ServerEvent.Disconnected();
@@ -71,7 +92,7 @@ public static class EventStream
                 yield return new ServerEvent.Unauthorised();
                 yield break;
             }
-            await options.PauseAsync(pause, ct).ConfigureAwait(false);
+            await EventOptions.PauseAsync(pause, retry, ct).ConfigureAwait(false);
             pause = NextPause(pause);
         }
     }
@@ -93,7 +114,7 @@ public static class EventStream
     }
 
     /// <summary>The next text message, or null when the connection has ended.</summary>
-    private static async Task<byte[]?> ReceiveAsync(ClientWebSocket ws, CancellationToken ct)
+    private static async Task<byte[]?> ReceiveAsync(ClientWebSocket ws, CancellationToken connection, CancellationToken ct)
     {
         var buf = new byte[16 * 1024];
         using var msg = new MemoryStream();
@@ -101,7 +122,7 @@ public static class EventStream
         {
             while (true)
             {
-                var r = await ws.ReceiveAsync(buf.AsMemory(), ct).ConfigureAwait(false);
+                var r = await ws.ReceiveAsync(buf.AsMemory(), connection).ConfigureAwait(false);
                 if (r.MessageType == WebSocketMessageType.Close) return null;
                 msg.Write(buf, 0, r.Count);
                 if (msg.Length > MaxMessage) return null;

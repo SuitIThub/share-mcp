@@ -162,6 +162,20 @@ public sealed class EventsTests : IDisposable
         Assert.IsType<ServerEvent.Connected>(await Next(ch));
     }
 
+    /// <summary>After waking up nobody should have to wait until the dead connection is noticed.</summary>
+    [Fact]
+    public async Task ReconnectDropsASilentConnection()
+    {
+        var acc = await _go.AccountAsync("PC");
+        using var srv = new ScriptedServer(_ => new(200) { WebSocket = _ => Task.Delay(20_000) });
+        var o = new EventOptions { BackoffBase = TimeSpan.FromSeconds(60), KeepAlive = TimeSpan.FromMinutes(5) };
+        var ch = Listen(new Api(acc with { ServerUrl = srv.Url }), o);
+        Assert.IsType<ServerEvent.Connected>(await Next(ch));
+        o.Reconnect();
+        Assert.IsType<ServerEvent.Disconnected>(await Next(ch));
+        Assert.IsType<ServerEvent.Connected>(await Next(ch));
+    }
+
     [Fact]
     public async Task UnknownOrBrokenMessagesAreIgnored()
     {

@@ -23,6 +23,12 @@ public abstract record Command
     /// <inheritdoc cref="Accept"/>
     public sealed record Decline(string Id) : Command;
 
+    /// <inheritdoc cref="Accept"/>
+    public sealed record OpenDownload(string Id) : Command;
+
+    /// <inheritdoc cref="Accept"/>
+    public sealed record OpenLink(string Url) : Command;
+
     internal byte[]? ToJson() => this switch
     {
         Show => JsonSerializer.SerializeToUtf8Bytes(new { cmd = "show" }),

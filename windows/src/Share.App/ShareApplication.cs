@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 using System.Windows;
+using Microsoft.Toolkit.Uwp.Notifications;
+using Microsoft.Win32;
 
 namespace Share.App;
 
@@ -12,6 +15,7 @@ public sealed class ShareApplication : Application
     private AppHost _host = null!;
     private Tray _tray = null!;
     private MainWindow _main = null!;
+    private Results _results = null!;
     private PairWindow? _pair;
 
     public ShareApplication(StartArgs args, Ipc ipc, string data)
@@ -30,17 +34,42 @@ public sealed class ShareApplication : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _host = new AppHost(new HostOptions(_data, Core.DiskDownloads.DefaultDirectory) { AllowLocalHttp = _args.AllowLocalHttp }, new SilentNotifier(), new Desktop(Dispatcher));
+        _host = new AppHost(new HostOptions(_data, Core.DiskDownloads.DefaultDirectory) { AllowLocalHttp = _args.AllowLocalHttp }, Notifier(), new Desktop(Dispatcher));
+        _results = new Results(_host);
         _tray = new Tray(() => Handle(new Command.Show()), SendFiles, Quit);
         _host.StateChanged += () => Dispatcher.InvokeAsync(UpdateTray);
         UpdateTray();
-        _main = new MainWindow(_host, new MainModel(_host, a => Dispatcher.InvokeAsync(a), new Results(_host), Path.Combine(_data, "temp")));
+        _main = new MainWindow(_host, new MainModel(_host, a => Dispatcher.InvokeAsync(a), _results, Path.Combine(_data, "temp")));
         _main.Model.PayloadOffered += async p => await OfferAsync(p);
         _main.SettingsWanted += Settings;
         _main.PairingWanted += () => Pair(null);
         _main.Hidden += OnHidden;
         _ipc.Listen(c => Dispatcher.InvokeAsync(() => HandleAsync(c)).Task.Unwrap());
+        SystemEvents.PowerModeChanged += OnPower;
+        NetworkChange.NetworkAvailabilityChanged += OnNetwork;
         if (_args.Command is not null) Handle(_args.Command);
+    }
+
+    /// <summary>With its own data folder (tests) the program stays out of the user's notifications.</summary>
+    private INotifier Notifier()
+    {
+        if (_args.DataDir is not null) return new SilentNotifier();
+        ToastNotificationManagerCompat.OnActivated += e =>
+        {
+            // comes on a worker thread, possibly before start-up has finished
+            if (ToastArgs.Parse(e.Argument) is { } c) Dispatcher.InvokeAsync(() => Handle(c));
+        };
+        return new ToastNotifier(new WindowsToasts());
+    }
+
+    private void OnPower(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume) _host.Engine?.Reconnect();
+    }
+
+    private void OnNetwork(object? sender, NetworkAvailabilityEventArgs e)
+    {
+        if (e.IsAvailable) _host.Engine?.Reconnect();
     }
 
     private void UpdateTray()
@@ -71,6 +100,13 @@ public sealed class ShareApplication : Application
                 break;
             case Command.Decline d:
                 _host.Run(e => e.DeclineAsync(d.Id));
+                break;
+            case Command.OpenDownload o:
+                if (_host.State.Downloads.FirstOrDefault(x => x.Transfer.Id == o.Id) is { Phase: Core.Phase.Done } done) _results.Open(done);
+                else _main.BringUp();
+                break;
+            case Command.OpenLink l:
+                _results.OpenLink(l.Url);
                 break;
         }
     }
@@ -137,13 +173,15 @@ public sealed class ShareApplication : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        SystemEvents.PowerModeChanged -= OnPower; // static events would keep us alive
+        NetworkChange.NetworkAvailabilityChanged -= OnNetwork;
         _tray.Dispose();
         _host.Dispose();
         base.OnExit(e);
     }
 }
 
-/// <summary>Until notifications are wired up.</summary>
+/// <summary>For tests of the whole program.</summary>
 internal sealed class SilentNotifier : INotifier
 {
     public bool Enabled => false;

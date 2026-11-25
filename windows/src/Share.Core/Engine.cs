@@ -132,7 +132,7 @@ public sealed class Engine : IDisposable
     }
 
     /// <summary>Reconnects without waiting, e.g. after waking up.</summary>
-    public void RetryNow() => _o.Events.RetryNow();
+    public void Reconnect() => _o.Events.Reconnect();
 
     private async Task Every(TimeSpan interval, Func<Task> f)
     {
