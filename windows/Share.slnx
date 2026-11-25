@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Share.Core/Share.Core.csproj" />
+  <Project Path="tests/Share.Core.Tests/Share.Core.Tests.csproj" />
+</Solution>

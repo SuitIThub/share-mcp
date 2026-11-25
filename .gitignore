@@ -11,3 +11,7 @@ android/local.properties
 android/keystore.properties
 android/app/google-services.json
 *.jks
+windows/**/bin/
+windows/**/obj/
+windows/dist/
+windows/.vs/
