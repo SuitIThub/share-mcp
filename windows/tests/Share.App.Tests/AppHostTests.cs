@@ -259,6 +259,16 @@ public sealed class AppHostTests
     }
 
     [Fact]
+    public async Task LeftOverTemporaryFilesAreRemovedAtStart()
+    {
+        await using var r = await new HostRig().Start(paired: false);
+        Directory.CreateDirectory(r.Host.TempDir);
+        File.WriteAllText(Path.Combine(r.Host.TempDir, "alt.png"), "x");
+        using var again = new AppHost(new HostOptions(r.Tmp.File("data"), r.Tmp.File("dl")), new FakeNotifier(), new FakeDesktop());
+        Assert.False(File.Exists(Path.Combine(r.Host.TempDir, "alt.png")));
+    }
+
+    [Fact]
     public async Task EngineChangesAreAnnounced()
     {
         await using var r = await new HostRig().Start(paired: false);

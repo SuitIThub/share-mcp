@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2"
+         xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap uap3 desktop desktop2 com rescap">
+  <Identity Name="SuitIThub.Share" Publisher="CN=Share (privat)" Version="1.0.0.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Share</DisplayName>
+    <PublisherDisplayName>Share (privat)</PublisherDisplayName>
+    <Logo>assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="de-DE" />
+    <Resource uap:Scale="100" />
+    <Resource uap:Scale="200" />
+  </Resources>
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <Capability Name="privateNetworkClientServer" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Applications>
+    <Application Id="Share" Executable="Share.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Share" Description="Dateien, Texte und Links zwischen eigenen Geräten senden" BackgroundColor="transparent"
+                          Square150x150Logo="assets\Square150x150Logo.png" Square44x44Logo="assets\Square44x44Logo.png" />
+      <Extensions>
+        <uap:Extension Category="windows.shareTarget">
+          <uap:ShareTarget Description="An eigene Geräte senden">
+            <uap:SupportedFileTypes>
+              <uap:SupportsAnyFileType />
+            </uap:SupportedFileTypes>
+            <uap:DataFormat>StorageItems</uap:DataFormat>
+            <uap:DataFormat>WebLink</uap:DataFormat>
+            <uap:DataFormat>Text</uap:DataFormat>
+            <uap:DataFormat>Bitmap</uap:DataFormat>
+          </uap:ShareTarget>
+        </uap:Extension>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="share">
+            <uap:DisplayName>Share koppeln</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="Share.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="share-senden.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+        <desktop:Extension Category="windows.startupTask" Executable="Share.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="ShareAutostart" Enabled="true" DisplayName="Share" />
+        </desktop:Extension>
+        <desktop:Extension Category="windows.toastNotificationActivation">
+          <desktop:ToastNotificationActivation ToastActivatorCLSID="6C5A8C5E-2C0B-4E0B-9B5F-0D2E8D7A4F31" />
+        </desktop:Extension>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="Share.exe" Arguments="-ToastActivated" DisplayName="Share-Benachrichtigungen">
+              <com:Class Id="6C5A8C5E-2C0B-4E0B-9B5F-0D2E8D7A4F31" DisplayName="Share-Benachrichtigungen" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Extensions>
+    <desktop2:Extension Category="windows.firewallRules">
+      <desktop2:FirewallRules Executable="Share.exe">
+        <desktop2:Rule Direction="in" IPProtocol="TCP" Profile="private" />
+      </desktop2:FirewallRules>
+    </desktop2:Extension>
+  </Extensions>
+</Package>

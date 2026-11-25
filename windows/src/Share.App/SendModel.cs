@@ -42,7 +42,7 @@ public sealed class SendModel : Observable
                 {
                     try
                     {
-                        files.Add(DiskFile.Open(path, f.Temporary));
+                        files.Add(DiskFile.Open(path, host.IsTemporary(path)));
                     }
                     catch (SourceException e)
                     {

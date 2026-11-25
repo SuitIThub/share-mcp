@@ -1,0 +1,10 @@
+<!-- only fetches makeappx, makepri and signtool for build.ps1 -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <BaseIntermediateOutputPath>../dist/tools/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2957" />
+  </ItemGroup>
+</Project>

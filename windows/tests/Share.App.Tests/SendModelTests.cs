@@ -14,6 +14,30 @@ public sealed class SendModelTests
         return c();
     }, what);
 
+    /// <summary>A file the program itself has put aside, e.g. a pasted picture.</summary>
+    private static string Temp(HostRig r, string name)
+    {
+        Directory.CreateDirectory(r.Host.TempDir);
+        var p = Path.Combine(r.Host.TempDir, name);
+        File.WriteAllBytes(p, new byte[10]);
+        return p;
+    }
+
+    /// <summary>Only our own temporary files are ever deleted, whatever a command claims.</summary>
+    [Fact]
+    public async Task ForeignFilesAreNeverDeleted()
+    {
+        await using var r = await new HostRig().Start();
+        foreach (var path in new[] { r.File("eigen.txt", 10), Path.Combine(r.Host.TempDir, "..", "..", "eigen.txt"), Path.Combine(r.Host.TempDir + "2", "x.txt") })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            Directory.CreateDirectory(r.Host.TempDir);
+            File.WriteAllBytes(path, new byte[10]);
+            (await Open(r, new Payload.Files([path]))).Cancel();
+            Assert.True(File.Exists(path), path);
+        }
+    }
+
     [Fact]
     public async Task OpensHandlesImmediately()
     {
@@ -121,9 +145,9 @@ public sealed class SendModelTests
     {
         await using var r = await new HostRig().Start();
         var keep = r.File("bleibt", 10);
-        var temp = r.File("temp", 10);
+        var temp = Temp(r, "temp");
         var a = await Open(r, new Payload.Files([keep]));
-        var b = await Open(r, new Payload.Files([temp], Temporary: true));
+        var b = await Open(r, new Payload.Files([temp]));
         a.Cancel();
         b.Cancel();
         a.Cancel();
@@ -135,8 +159,8 @@ public sealed class SendModelTests
     public async Task TemporaryFilesAreDeletedAfterTheOffer()
     {
         await using var r = await new HostRig().Start();
-        var temp = r.File("temp.png", 10);
-        var m = await Open(r, new Payload.Files([temp], Temporary: true), all: true);
+        var temp = Temp(r, "temp.png");
+        var m = await Open(r, new Payload.Files([temp]), all: true);
         m.Send();
         await r.Until(() => r.Engine.State.Outgoing.Count == 1, "offered");
         Assert.True(File.Exists(temp));
@@ -148,8 +172,8 @@ public sealed class SendModelTests
     public async Task FailedSendIsToldAndReleased()
     {
         await using var r = await new HostRig().Start();
-        var temp = r.File("temp.png", 10);
-        var m = await Open(r, new Payload.Files([temp], Temporary: true), all: true);
+        var temp = Temp(r, "temp.png");
+        var m = await Open(r, new Payload.Files([temp]), all: true);
         r.Go.Stop();
         m.Send();
         await r.Until(() => r.Notifier.Has("message Keine Verbindung zum Server"), "told");

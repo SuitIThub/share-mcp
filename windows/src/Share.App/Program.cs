@@ -12,10 +12,21 @@ public static class Program
     public static int Main(string[] argv)
     {
         var args = StartArgs.Parse(argv);
+        var activation = Activation.Current();
+        if (activation.Background) args = args with { Background = true, Command = null };
+        if (activation.Link is { } link) args = StartArgs.Parse([link]);
+        if (activation.Share is not null) args = args with { Command = null };
         var data = args.DataDir ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Share");
         using var ipc = new Ipc(InstanceName(data));
         if (!ipc.IsFirst)
         {
+            if (activation.Share is { } share)
+            {
+                Native.AllowSetForegroundWindow(Native.AnyProcess);
+                Task.Run(() => ShareTarget.HandleAsync(new WindowsShareData(share.ShareOperation), Path.Combine(Path.GetFullPath(data), "temp"),
+                    c => Task.FromResult(ipc.TrySend(c, TimeSpan.FromMinutes(1))))).GetAwaiter().GetResult();
+                return 0;
+            }
             if (args.Command is null) return 0; // started in the background, but already running
             Native.AllowSetForegroundWindow(Native.AnyProcess);
             if (ipc.TrySend(args.Command)) return 0;
@@ -23,7 +34,7 @@ public static class Program
             return 1;
         }
         Log(data);
-        return new ShareApplication(args, ipc, data).Run();
+        return new ShareApplication(args, activation.Share, ipc, data).Run();
     }
 
     /// <summary>One instance per user and data folder.</summary>

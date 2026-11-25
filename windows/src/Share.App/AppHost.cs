@@ -54,8 +54,38 @@ public sealed class AppHost : IDisposable
     public AppHost(HostOptions options, INotifier notifier, IDesktop desktop)
     {
         (_o, _notifier, _desktop) = (options, notifier, desktop);
+        TempDir = Path.Combine(Path.GetFullPath(options.DataDir), "temp");
+        CleanTemp();
         _store = new AccountStore(Path.Combine(options.DataDir, "account.bin"));
         Use(_store.Load());
+    }
+
+    /// <summary>Where pasted pictures and copies of shared items wait to be sent.</summary>
+    public string TempDir { get; }
+
+    /// <summary>Only files in our own folder are ever deleted after sending, whatever a command claims.</summary>
+    public bool IsTemporary(string path)
+    {
+        try
+        {
+            return Path.GetFullPath(path).StartsWith(TempDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception e) when (e is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private void CleanTemp()
+    {
+        try
+        {
+            if (Directory.Exists(TempDir)) Directory.Delete(TempDir, true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // next time
+        }
     }
 
     public bool AllowLocalHttp => _o.AllowLocalHttp;

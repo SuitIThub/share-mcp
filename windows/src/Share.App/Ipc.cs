@@ -10,8 +10,8 @@ public abstract record Command
 {
     public sealed record Show : Command;
 
-    /// <summary>Presents files for sending; nothing is sent without a click. Temporary files are deleted afterwards.</summary>
-    public sealed record Send(IReadOnlyList<string> Paths, bool Temporary = false) : Command;
+    /// <summary>Presents files for sending; nothing is sent without a click.</summary>
+    public sealed record Send(IReadOnlyList<string> Paths) : Command;
     public sealed record SendText(string Text) : Command;
 
     /// <summary>Opens the pairing window with the fields filled in.</summary>
@@ -32,7 +32,7 @@ public abstract record Command
     internal byte[]? ToJson() => this switch
     {
         Show => JsonSerializer.SerializeToUtf8Bytes(new { cmd = "show" }),
-        Send s => JsonSerializer.SerializeToUtf8Bytes(new { cmd = "send", paths = s.Paths, temporary = s.Temporary }),
+        Send s => JsonSerializer.SerializeToUtf8Bytes(new { cmd = "send", paths = s.Paths }),
         SendText t => JsonSerializer.SerializeToUtf8Bytes(new { cmd = "text", text = t.Text }),
         Pair p => JsonSerializer.SerializeToUtf8Bytes(new { cmd = "pair", link = p.Link }),
         _ => null,
@@ -47,7 +47,7 @@ public abstract record Command
             return o.GetProperty("cmd").GetString() switch
             {
                 "show" => new Show(),
-                "send" => new Send([.. o.GetProperty("paths").EnumerateArray().Select(e => e.GetString()!)], o.TryGetProperty("temporary", out var t) && t.GetBoolean()),
+                "send" => new Send([.. o.GetProperty("paths").EnumerateArray().Select(e => e.GetString()!)]),
                 "text" => new SendText(o.GetProperty("text").GetString()!),
                 "pair" => new Pair(o.GetProperty("link").GetString()!),
                 _ => null,

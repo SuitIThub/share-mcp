@@ -3,6 +3,7 @@ using System.Net.NetworkInformation;
 using System.Windows;
 using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Win32;
+using Windows.ApplicationModel.Activation;
 
 namespace Share.App;
 
@@ -10,6 +11,7 @@ namespace Share.App;
 public sealed class ShareApplication : Application
 {
     private readonly StartArgs _args;
+    private readonly ShareTargetActivatedEventArgs? _share;
     private readonly Ipc _ipc;
     private readonly string _data;
     private AppHost _host = null!;
@@ -18,9 +20,9 @@ public sealed class ShareApplication : Application
     private Results _results = null!;
     private PairWindow? _pair;
 
-    public ShareApplication(StartArgs args, Ipc ipc, string data)
+    public ShareApplication(StartArgs args, ShareTargetActivatedEventArgs? share, Ipc ipc, string data)
     {
-        (_args, _ipc, _data) = (args, ipc, data);
+        (_args, _share, _ipc, _data) = (args, share, ipc, data);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         ThemeMode = ThemeMode.System;
         DispatcherUnhandledException += (_, e) =>
@@ -39,7 +41,7 @@ public sealed class ShareApplication : Application
         _tray = new Tray(() => Handle(new Command.Show()), SendFiles, Quit);
         _host.StateChanged += () => Dispatcher.InvokeAsync(UpdateTray);
         UpdateTray();
-        _main = new MainWindow(_host, new MainModel(_host, a => Dispatcher.InvokeAsync(a), _results, Path.Combine(_data, "temp")));
+        _main = new MainWindow(_host, new MainModel(_host, a => Dispatcher.InvokeAsync(a), _results));
         _main.Model.PayloadOffered += async p => await OfferAsync(p);
         _main.SettingsWanted += Settings;
         _main.PairingWanted += () => Pair(null);
@@ -48,6 +50,11 @@ public sealed class ShareApplication : Application
         SystemEvents.PowerModeChanged += OnPower;
         NetworkChange.NetworkAvailabilityChanged += OnNetwork;
         if (_args.Command is not null) Handle(_args.Command);
+        if (_share is not null) _ = Task.Run(() => ShareTarget.HandleAsync(new WindowsShareData(_share.ShareOperation), _host.TempDir, async c =>
+        {
+            await (await Dispatcher.InvokeAsync(() => HandleAsync(c)));
+            return true;
+        }));
     }
 
     /// <summary>With its own data folder (tests) the program stays out of the user's notifications.</summary>
@@ -87,7 +94,7 @@ public sealed class ShareApplication : Application
                 _main.BringUp();
                 break;
             case Command.Send f:
-                await OfferAsync(new Payload.Files(f.Paths, f.Temporary));
+                await OfferAsync(new Payload.Files(f.Paths));
                 break;
             case Command.SendText t:
                 await OfferAsync(new Payload.Text(t.Text));

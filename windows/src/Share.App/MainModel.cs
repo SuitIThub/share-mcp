@@ -9,7 +9,7 @@ namespace Share.App;
 /// <summary>Something to be sent, before targets are chosen.</summary>
 public abstract record Payload
 {
-    public sealed record Files(IReadOnlyList<string> Paths, bool Temporary = false) : Payload;
+    public sealed record Files(IReadOnlyList<string> Paths) : Payload;
     public sealed record Text(string Content) : Payload;
 }
 
@@ -26,14 +26,13 @@ public sealed class MainModel : Observable
     private readonly AppHost _host;
     private readonly Action<Action> _post;
     private readonly IOpener _opener;
-    private readonly string _tempDir;
     private int _pending;
     private string _status = "", _message = "";
     private bool _noIncoming = true, _noDevices = true, _noRunning = true, _needsPairing;
 
-    public MainModel(AppHost host, Action<Action> post, IOpener opener, string tempDir)
+    public MainModel(AppHost host, Action<Action> post, IOpener opener)
     {
-        (_host, _post, _opener, _tempDir) = (host, post, opener, tempDir);
+        (_host, _post, _opener) = (host, post, opener);
         CloseMessage = new RelayCommand(() => Message = "");
         host.StateChanged += Invalidate;
         host.EngineChanged += Invalidate;
@@ -191,7 +190,7 @@ public sealed class MainModel : Observable
         }
         if (data.GetData(DataFormats.Bitmap) is BitmapSource image)
         {
-            PayloadOffered?.Invoke(new Payload.Files([SaveImage(image)], Temporary: true));
+            PayloadOffered?.Invoke(new Payload.Files([SaveImage(image)]));
             return true;
         }
         return false;
@@ -199,8 +198,8 @@ public sealed class MainModel : Observable
 
     private string SaveImage(BitmapSource image)
     {
-        Directory.CreateDirectory(_tempDir);
-        var path = Path.Combine(_tempDir, $"Bild {DateTime.Now:yyyy-MM-dd HH-mm-ss-fff}.png");
+        Directory.CreateDirectory(_host.TempDir);
+        var path = Path.Combine(_host.TempDir, $"Bild {DateTime.Now:yyyy-MM-dd HH-mm-ss-fff}.png");
         var png = new PngBitmapEncoder();
         png.Frames.Add(BitmapFrame.Create(image));
         using var f = File.Create(path);
@@ -218,14 +217,14 @@ public static class Sending
     }
 
     /// <summary>Opens what can be opened; folders and unreadable files are told and left out.</summary>
-    public static IReadOnlyList<DiskFile> Open(AppHost host, IReadOnlyList<string> paths, bool temporary = false)
+    public static IReadOnlyList<DiskFile> Open(AppHost host, IReadOnlyList<string> paths)
     {
         var files = new List<DiskFile>();
         foreach (var p in paths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
             {
-                files.Add(DiskFile.Open(p, temporary));
+                files.Add(DiskFile.Open(p, host.IsTemporary(p)));
             }
             catch (SourceException ex)
             {

@@ -37,13 +37,12 @@ public sealed class IpcTests : IDisposable
         First();
         var second = New();
         Assert.False(second.IsFirst);
-        Command[] all = [new Command.Show(), new Command.Send(["C:\\ä ö.txt", "D:\\b"], true), new Command.SendText("häl\nlo \"x\""), new Command.Pair("share://pair?code=A&url=b")];
+        Command[] all = [new Command.Show(), new Command.Send(["C:\\ä ö.txt", "D:\\b"]), new Command.SendText("häl\nlo \"x\""), new Command.Pair("share://pair?code=A&url=b")];
         foreach (var c in all) Assert.True(second.TrySend(c));
         Assert.Equal(4, _got.Count);
         Assert.Equal(all[0], _got.ElementAt(0));
         var send = Assert.IsType<Command.Send>(_got.ElementAt(1));
         Assert.Equal(["C:\\ä ö.txt", "D:\\b"], send.Paths);
-        Assert.True(send.Temporary);
         Assert.Equal(all[2], _got.ElementAt(2));
         Assert.Equal(all[3], _got.ElementAt(3));
     }

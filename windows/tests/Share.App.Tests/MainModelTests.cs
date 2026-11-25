@@ -15,7 +15,7 @@ public sealed class MainModelTests
 {
     private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _ui = new(); // the UI thread's queue
 
-    private MainModel Model(HostRig r, FakeOpener? opener = null) => new(r.Host, _ui.Enqueue, opener ?? new FakeOpener(), r.Tmp.File("temp"));
+    private MainModel Model(HostRig r, FakeOpener? opener = null) => new(r.Host, _ui.Enqueue, opener ?? new FakeOpener());
 
     private void Drain()
     {
@@ -261,7 +261,7 @@ public sealed class MainModelTests
         {
             posted++;
             last = a;
-        }, new FakeOpener(), r.Tmp.File("temp"));
+        }, new FakeOpener());
         await r.Peer.OfferTextAsync(Kind.Text, "x", ["PC"], false);
         await r.Until(() => r.Engine.State.Incoming.Count > 0 && posted > 0, "posted");
         Assert.Empty(m.Incoming); // nothing happens on the worker thread
@@ -296,12 +296,11 @@ public sealed class MainModelTests
 
         Assert.True(m.Paste(new DataObject(DataFormats.FileDrop, new[] { "C:\\a.txt", "C:\\b.txt" })));
         Assert.Equal(["C:\\a.txt", "C:\\b.txt"], Assert.IsType<Payload.Files>(got[1]).Paths);
-        Assert.False(((Payload.Files)got[1]).Temporary);
 
         var bmp = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgr24, null, new byte[12], 6);
         Assert.True(m.Paste(new DataObject(DataFormats.Bitmap, bmp)));
         var img = Assert.IsType<Payload.Files>(got[2]);
-        Assert.True(img.Temporary);
+        Assert.True(r.Host.IsTemporary(img.Paths.Single()));
         Assert.EndsWith(".png", img.Paths.Single());
         Assert.Equal([0x89, (byte)'P', (byte)'N', (byte)'G'], File.ReadAllBytes(img.Paths.Single())[..4]);
 
