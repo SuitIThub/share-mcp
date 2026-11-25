@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NeutralLanguage>de</NeutralLanguage>
     <SatelliteResourceLanguages>de</SatelliteResourceLanguages>
   </PropertyGroup>
