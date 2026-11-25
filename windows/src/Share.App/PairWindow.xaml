@@ -1,0 +1,18 @@
+<Window x:Class="Share.App.PairWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:Share.App"
+        Icon="pack://application:,,,/Share;component/share.ico" Language="de-DE"
+        WindowStartupLocation="CenterScreen" Title="Mit Server koppeln" Width="420" SizeToContent="Height" ResizeMode="NoResize">
+    <StackPanel Margin="16">
+        <TextBlock TextWrapping="Wrap" Text="Erzeuge auf dem Server mit „share-server pair“ oder in einem gekoppelten Gerät unter „Gerät hinzufügen“ einen Code." />
+        <Label Content="_Server-Adresse" Target="{Binding ElementName=Url}" Margin="0,12,0,0" />
+        <TextBox x:Name="Url" Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="url" />
+        <Label Content="_Code" Target="{Binding ElementName=Code}" />
+        <TextBox x:Name="Code" Text="{Binding Code, UpdateSourceTrigger=PropertyChanged}" CharacterCasing="Normal" AutomationProperties.AutomationId="code" />
+        <Label Content="_Gerätename" Target="{Binding ElementName=DeviceName}" />
+        <TextBox x:Name="DeviceName" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="name" />
+        <TextBlock Text="{Binding Error}" Foreground="#D13438" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.AutomationId="error" AutomationProperties.LiveSetting="Assertive" />
+        <Button Content="Koppeln" IsDefault="True" IsEnabled="{Binding CanPair}" Click="OnPair" HorizontalAlignment="Right" Margin="0,8,0,0" AutomationProperties.AutomationId="pair" />
+    </StackPanel>
+</Window>

@@ -12,6 +12,7 @@ public sealed class ShareApplication : Application
     private AppHost _host = null!;
     private Tray _tray = null!;
     private MainWindow _main = null!;
+    private PairWindow? _pair;
 
     public ShareApplication(StartArgs args, Ipc ipc, string data)
     {
@@ -30,11 +31,15 @@ public sealed class ShareApplication : Application
     {
         base.OnStartup(e);
         _host = new AppHost(new HostOptions(_data, Core.DiskDownloads.DefaultDirectory) { AllowLocalHttp = _args.AllowLocalHttp }, new SilentNotifier(), new Desktop(Dispatcher));
-        _tray = new Tray(() => Handle(new Command.Show()), () => Handle(new Command.Show()), Quit);
+        _tray = new Tray(() => Handle(new Command.Show()), SendFiles, Quit);
         _host.StateChanged += () => Dispatcher.InvokeAsync(UpdateTray);
         UpdateTray();
         _main = new MainWindow(_host, new MainModel(_host, a => Dispatcher.InvokeAsync(a), new Results(_host), Path.Combine(_data, "temp")));
-        _ipc.Listen(c => Dispatcher.InvokeAsync(() => Handle(c)).Task);
+        _main.Model.PayloadOffered += async p => await OfferAsync(p);
+        _main.SettingsWanted += Settings;
+        _main.PairingWanted += () => Pair(null);
+        _main.Hidden += OnHidden;
+        _ipc.Listen(c => Dispatcher.InvokeAsync(() => HandleAsync(c)).Task.Unwrap());
         if (_args.Command is not null) Handle(_args.Command);
     }
 
@@ -44,10 +49,83 @@ public sealed class ShareApplication : Application
         _tray.Update(s.Incoming.Count, s.Connected);
     }
 
-    private void Handle(Command c)
+    private async Task HandleAsync(Command c)
     {
         Trace.TraceInformation("command " + c.GetType().Name);
-        if (c is Command.Show) _main.BringUp();
+        switch (c)
+        {
+            case Command.Show:
+                _main.BringUp();
+                break;
+            case Command.Send f:
+                await OfferAsync(new Payload.Files(f.Paths, f.Temporary));
+                break;
+            case Command.SendText t:
+                await OfferAsync(new Payload.Text(t.Text));
+                break;
+            case Command.Pair p:
+                Pair(p.Link);
+                break;
+            case Command.Accept a:
+                _host.Run(e => e.AcceptAsync(a.Id));
+                break;
+            case Command.Decline d:
+                _host.Run(e => e.DeclineAsync(d.Id));
+                break;
+        }
+    }
+
+    private async void Handle(Command c) => await HandleAsync(c);
+
+    /// <summary>Asks for targets; every payload gets its own window. Completes once all files are open.</summary>
+    private async Task OfferAsync(Payload p)
+    {
+        var picked = _main.IsVisible ? _main.Model.Targets : new TargetList();
+        var m = await SendModel.OpenAsync(_host, a => Dispatcher.InvokeAsync(a), p, picked.SelectedIds, picked.All);
+        var w = new SendWindow(m);
+        w.PairingWanted += () => Pair(null);
+        w.Show();
+        w.Topmost = true; // from the share menu there is no focus to inherit
+        w.Topmost = false;
+    }
+
+    /// <summary>A link never replaces an existing pairing.</summary>
+    private void Pair(string? link)
+    {
+        if (_host.Engine is { State.Unauthorised: false })
+        {
+            _main.BringUp();
+            if (link is not null) _host.Tell("Dieses Gerät ist schon gekoppelt");
+            return;
+        }
+        if (_pair is null)
+        {
+            _pair = new PairWindow(new PairModel(_host));
+            _pair.Closed += (_, _) => _pair = null;
+            _pair.Show();
+        }
+        if (link is not null) _pair.Fill(link);
+        _pair.Activate();
+    }
+
+    private void Settings()
+    {
+        var w = new SettingsWindow(new SettingsModel(_host, new Autostart())) { Owner = _main };
+        w.ShowDialog();
+    }
+
+    private async void SendFiles()
+    {
+        if (App.MainWindow.PickFiles(null) is { Count: > 0 } paths) await OfferAsync(new Payload.Files(paths));
+    }
+
+    /// <summary>Once, so nobody wonders where the window went.</summary>
+    private void OnHidden()
+    {
+        var marker = Path.Combine(_data, "hinted");
+        if (File.Exists(marker)) return;
+        File.WriteAllText(marker, "");
+        _host.Tell("Share läuft weiter", "Du findest es im Infobereich neben der Uhr. Beenden kannst du es dort mit einem Rechtsklick.");
     }
 
     private void Quit()

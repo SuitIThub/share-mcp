@@ -1,0 +1,40 @@
+<Window x:Class="Share.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:Share.App"
+        Icon="pack://application:,,,/Share;component/share.ico" Language="de-DE"
+        WindowStartupLocation="CenterOwner" Title="Einstellungen" Width="420" Height="620" MinWidth="320" MinHeight="300">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="Show" />
+        <app:NotNullToVisibility x:Key="ShowIfSet" />
+    </Window.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16">
+            <TextBlock Text="{Binding Server}" TextWrapping="Wrap" />
+            <Label Content="_Gerätename" Target="{Binding ElementName=DeviceName}" Margin="0,8,0,0" />
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Speichern" Margin="8,0,0,0" IsEnabled="{Binding CanRename}" Click="OnRename" />
+                <TextBox x:Name="DeviceName" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+            </DockPanel>
+            <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite" />
+            <CheckBox Content="Mit Windows starten" IsChecked="{Binding Autostart, Mode=OneWay}" Click="OnAutostart" Margin="0,8"
+                      Visibility="{Binding AutostartAvailable, Converter={StaticResource Show}}" />
+            <StackPanel Visibility="{Binding NotificationsOff, Converter={StaticResource Show}}" Margin="0,8">
+                <TextBlock Text="Windows-Benachrichtigungen sind aus. Anfragen siehst du dann nur im Fenster und am Punkt auf dem Symbol." TextWrapping="Wrap" />
+                <Button Content="Benachrichtigungen öffnen" Click="OnNotifications" Margin="0,4,0,0" />
+            </StackPanel>
+            <Separator Margin="0,8" />
+            <Button Content="Gerät hinzufügen" IsEnabled="{Binding Paired}" Click="OnAdd" AutomationProperties.AutomationId="addDevice" />
+            <StackPanel Visibility="{Binding NewCode, Converter={StaticResource ShowIfSet}}" Margin="0,8,0,0">
+                <TextBlock Text="Auf dem neuen Gerät scannen oder eingeben." TextWrapping="Wrap" />
+                <TextBox Text="{Binding NewCode, Mode=OneWay}" IsReadOnly="True" FontSize="24" BorderThickness="0" Background="Transparent" AutomationProperties.AutomationId="newCode" />
+                <TextBlock Text="{Binding CodeHint}" Opacity="0.7" />
+                <Border Background="White" Padding="8" HorizontalAlignment="Left" Margin="0,8,0,0">
+                    <Image Source="{Binding Qr}" Width="220" Height="220" RenderOptions.BitmapScalingMode="NearestNeighbor" AutomationProperties.Name="QR-Code zum Koppeln" />
+                </Border>
+            </StackPanel>
+            <Separator Margin="0,16,0,8" />
+            <Button Content="Abmelden" IsEnabled="{Binding Paired}" Click="OnUnpair" AutomationProperties.AutomationId="unpair" />
+        </StackPanel>
+    </ScrollViewer>
+</Window>

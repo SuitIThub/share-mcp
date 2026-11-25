@@ -1,0 +1,32 @@
+<Window x:Class="Share.App.SendWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:Share.App"
+        Icon="pack://application:,,,/Share;component/share.ico" Language="de-DE"
+        WindowStartupLocation="CenterScreen" Title="Share – senden" Width="400" SizeToContent="Height" MaxHeight="640" ResizeMode="CanMinimize">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="Show" />
+    </Window.Resources>
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.AutomationId="sendTitle" />
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Details}" TextWrapping="Wrap" MaxHeight="90" TextTrimming="CharacterEllipsis" Opacity="0.8" Margin="0,4" Visibility="{Binding HasFiles, Converter={StaticResource Show}}" />
+        <TextBox DockPanel.Dock="Top" x:Name="Content_" Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinLines="2" MaxLines="8" VerticalScrollBarVisibility="Auto"
+                 Margin="0,8" Visibility="{Binding IsText, Converter={StaticResource Show}}" AutomationProperties.Name="Text oder Link" AutomationProperties.AutomationId="text" />
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Problem}" Foreground="#D13438" TextWrapping="Wrap" />
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Abbrechen" IsCancel="True" Click="OnCancel" />
+            <Button Content="Senden" IsDefault="True" IsEnabled="{Binding CanSend}" Click="OnSend" Margin="8,0,0,0" AutomationProperties.AutomationId="sendNow" />
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Visibility="{Binding NeedsPairing, Converter={StaticResource Show}}" Margin="0,8,0,0">
+            <TextBlock Text="Dieses Gerät muss zuerst gekoppelt werden." TextWrapping="Wrap" />
+            <Button Content="Mit Server koppeln" Click="OnPair" Margin="0,4,0,0" />
+        </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
+            <StackPanel>
+                <TextBlock Text="verbinde …" Visibility="{Binding Connecting, Converter={StaticResource Show}}" />
+                <TextBlock Text="Noch kein anderes Gerät gekoppelt" Visibility="{Binding NoDevices, Converter={StaticResource Show}}" />
+                <app:TargetPicker DataContext="{Binding Targets}" />
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
