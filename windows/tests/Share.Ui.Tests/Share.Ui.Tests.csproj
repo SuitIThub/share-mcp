@@ -1,0 +1,24 @@
+<!-- drives the published program on the desktop; run on purpose: pwsh packaging/build.ps1 -Loose; dotnet test tests/Share.Ui.Tests -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>Share.Ui.Tests</RootNamespace>
+    <UseWPF>true</UseWPF>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);xUnit1031;xUnit1051;xUnit2012;xUnit2013;NU1701</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+    <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
+    <ProjectReference Include="../../src/Share.Core/Share.Core.csproj" />
+    <Compile Include="../Share.Core.Tests/GoServer.cs" />
+    <Compile Include="../Share.Core.Tests/TestFiles.cs" />
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+    <Using Include="Xunit" />
+    <Using Include="Share.Core" />
+    <Using Include="Share.Core.Tests" />
+  </ItemGroup>
+</Project>

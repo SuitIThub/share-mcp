@@ -6,6 +6,7 @@ Privates „Quick Share übers Internet“: Text, Links und Dateien zwischen eig
 - Protokoll (für Apps): `docs/protocol.md`
 - Server betreiben: `docs/deploy/README.md`
 - Android-App: `docs/android.md`
+- Windows-Programm: `docs/windows.md`
 
 ## Bauen
 

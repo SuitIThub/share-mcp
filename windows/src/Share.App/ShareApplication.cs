@@ -36,7 +36,7 @@ public sealed class ShareApplication : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _host = new AppHost(new HostOptions(_data, Core.DiskDownloads.DefaultDirectory) { AllowLocalHttp = _args.AllowLocalHttp }, Notifier(), new Desktop(Dispatcher));
+        _host = new AppHost(new HostOptions(_data, _args.DataDir is null ? Core.DiskDownloads.DefaultDirectory : Path.Combine(_data, "Downloads")) { AllowLocalHttp = _args.AllowLocalHttp }, Notifier(), new Desktop(Dispatcher));
         _results = new Results(_host);
         _tray = new Tray(() => Handle(new Command.Show()), SendFiles, Quit);
         _host.StateChanged += () => Dispatcher.InvokeAsync(UpdateTray);
