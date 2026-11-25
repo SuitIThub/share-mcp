@@ -51,6 +51,36 @@ public sealed class EventOptions
 
     internal Task RetrySignal => _retry.Task;
 
+    /// <summary>Repeats a call that failed although the connection is up, with growing pauses, until it succeeds or is not wanted any more.</summary>
+    internal async Task RepeatAsync(Func<Task> f, Func<bool> wanted, CancellationToken ct)
+    {
+        var pause = BackoffBase;
+        try
+        {
+            while (wanted())
+            {
+                try
+                {
+                    await f().ConfigureAwait(false);
+                    return;
+                }
+                catch (ApiException e) when (e.Status == 401)
+                {
+                    return;
+                }
+                catch (IOException)
+                {
+                    await Task.Delay(pause, ct).ConfigureAwait(false);
+                    pause = pause * 2 < TimeSpan.FromSeconds(30) ? pause * 2 : TimeSpan.FromSeconds(30);
+                }
+            }
+        }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
+        {
+            // closing
+        }
+    }
+
     internal static async Task PauseAsync(TimeSpan t, Task retry, CancellationToken ct)
     {
         await Task.WhenAny(Task.Delay(t, ct), retry).ConfigureAwait(false);

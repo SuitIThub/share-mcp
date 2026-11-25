@@ -23,7 +23,7 @@ public partial class SendWindow : Window
 
     public event Action? PairingWanted;
 
-    private void OnSend(object sender, RoutedEventArgs e) => _model.Send();
+    private void OnSend(object sender, RoutedEventArgs e) => _ = _model.Send();
     private void OnCancel(object sender, RoutedEventArgs e) => _model.Cancel();
     private void OnPair(object sender, RoutedEventArgs e) => PairingWanted?.Invoke();
 }

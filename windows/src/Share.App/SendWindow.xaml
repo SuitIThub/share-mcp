@@ -23,6 +23,7 @@
         </StackPanel>
         <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
             <StackPanel>
+                <TextBlock Text="sende …" Visibility="{Binding IsSending, Converter={StaticResource Show}}" />
                 <TextBlock Text="verbinde …" Visibility="{Binding Connecting, Converter={StaticResource Show}}" />
                 <TextBlock Text="Noch kein anderes Gerät gekoppelt" Visibility="{Binding NoDevices, Converter={StaticResource Show}}" />
                 <app:TargetPicker DataContext="{Binding Targets}" />

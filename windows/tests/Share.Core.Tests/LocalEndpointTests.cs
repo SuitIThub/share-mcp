@@ -7,6 +7,7 @@ using System.Text;
 
 namespace Share.Core.Tests;
 
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class LocalEndpointTests : IDisposable
 {
     private static readonly Identity Id = Identity.Generate("a");
@@ -331,4 +332,48 @@ public sealed class LocalEndpointTests : IDisposable
 
     [Fact]
     public Task CloseConnectionsEndsDownloadsOfThatOffer() => AssertEnds(() => _ep.CloseConnections("t1"));
+
+    /// <summary>Schannel needs the key in a container on disk; it must not stay there.</summary>
+    [Fact]
+    public async Task KeyContainerExistsOnlyWhileRunning()
+    {
+        var id = Identity.Generate("k");
+        var name = "Share-" + id.Fingerprint;
+        static bool Exists(string n) => System.Security.Cryptography.CngKey.Exists(n);
+        using var ep = new LocalEndpoint(id, 0, _ => Task.FromResult<Offer?>(null));
+        Assert.False(Exists(name));
+        for (var i = 0; i < 2; i++)
+        {
+            var port = ep.Start();
+            Assert.True(Exists(name));
+            using var http = new HttpClient(Pinning.CreateHandler(id.Fingerprint));
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"https://127.0.0.1:{port}/t/x/ping")).StatusCode);
+            if (i == 0) ep.Stop();
+        }
+        // a second endpoint of the same identity keeps it alive
+        using var other = new LocalEndpoint(Identity.Load(id.CertPem, id.KeyPem), 0, _ => Task.FromResult<Offer?>(null));
+        var p2 = other.Start();
+        ep.Stop();
+        Assert.True(Exists(name));
+        using (var http = new HttpClient(Pinning.CreateHandler(id.Fingerprint)))
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"https://127.0.0.1:{p2}/t/x/ping")).StatusCode);
+        other.Stop();
+        Assert.False(Exists(name));
+    }
+
+    /// <summary>After a crash the next start takes over the container instead of adding another one.</summary>
+    [Fact]
+    public async Task LeftOverKeyContainerIsReplaced()
+    {
+        var id = Identity.Generate("k");
+        var name = "Share-" + id.Fingerprint;
+        System.Security.Cryptography.CngKey.Create(System.Security.Cryptography.CngAlgorithm.ECDsaP256, name).Dispose();
+        using (var ep = new LocalEndpoint(id, 0, _ => Task.FromResult<Offer?>(null)))
+        {
+            var port = ep.Start();
+            using var http = new HttpClient(Pinning.CreateHandler(id.Fingerprint));
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"https://127.0.0.1:{port}/t/x/ping")).StatusCode);
+        }
+        Assert.False(System.Security.Cryptography.CngKey.Exists(name));
+    }
 }

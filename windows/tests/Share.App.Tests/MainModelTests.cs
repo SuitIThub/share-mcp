@@ -326,4 +326,14 @@ public sealed class MainModelTests
         await r.Until(() => r.Peer.State.Incoming.Any(t => t.Files.Count == 1), "offered");
         await r.Until(() => r.Notifier.Has("message „") && r.Notifier.Calls.Any(c => c.Contains("Ordner")), "told");
     }
+
+    /// <summary>Only a window that is really being looked at replaces notifications.</summary>
+    [Fact]
+    public void AttendedWindow()
+    {
+        Assert.True(App.MainWindow.Attended(open: true, active: true, locked: false));
+        Assert.False(App.MainWindow.Attended(open: true, active: false, locked: false));
+        Assert.False(App.MainWindow.Attended(open: true, active: true, locked: true));
+        Assert.False(App.MainWindow.Attended(open: false, active: true, locked: false));
+    }
 }

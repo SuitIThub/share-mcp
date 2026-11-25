@@ -121,12 +121,13 @@ public sealed class ProgramTest : IDisposable
         peer.Start();
         await Eventually.True(() => peer.State.Connected, "peer");
 
+        // what is ticked in the main window must not be sent to by a stray Enter in a window from outside
+        ((TogglePattern)Named(main, "Handy", 30).GetCurrentPattern(TogglePattern.Pattern)).Toggle();
+
         // "Senden an": a second start hands over to the first and ends
-        using (var second = Run("--send", _tmp.File("foto.jpg", data), _tmp.Path))
-        {
-            await second.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
-            Assert.Equal(0, second.ExitCode);
-        }
+        var second = Run("--send", _tmp.File("foto.jpg", data), _tmp.Path);
+        await second.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(0, second.ExitCode);
         var sw = Window("Share – senden");
         Named(sw, "foto.jpg (4,8 MB) senden");
         var texts = sw.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)).Cast<AutomationElement>();
@@ -155,7 +156,7 @@ public sealed class ProgramTest : IDisposable
         ((WindowPattern)main.GetCurrentPattern(WindowPattern.Pattern)).Close();
         await Task.Delay(800);
         Assert.False(_started[0].HasExited);
-        using (var again = Run()) await again.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        await Run().WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
         Named(Window("Share"), "verbunden");
         _started[0].Kill();
         await _started[0].WaitForExitAsync();

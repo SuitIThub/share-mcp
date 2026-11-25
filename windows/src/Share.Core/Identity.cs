@@ -1,4 +1,5 @@
 using System.Net.Security;
+using System.Runtime.Versioning;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -13,18 +14,18 @@ public sealed class Identity
         using var key = ECDsa.Create();
         key.ImportFromPem(keyPem);
         using var bare = X509Certificate2.CreateFromPem(certPem);
-        using var both = bare.CopyWithPrivateKey(key);
+        using var both = bare.CopyWithPrivateKey(key); // they must belong together
         CertPem = certPem;
         KeyPem = keyPem;
         Fingerprint = FingerprintOf(bare);
-        // Schannel cannot use ephemeral keys, so the key has to pass through a PFX into a (temporary) key container
-        ServerCertificate = X509CertificateLoader.LoadPkcs12(both.Export(X509ContentType.Pfx), null);
     }
 
     public string CertPem { get; }
     public string KeyPem { get; }
     public string Fingerprint { get; }
-    public X509Certificate2 ServerCertificate { get; }
+
+    /// <summary>The certificate for a TLS server; dispose it when serving ends.</summary>
+    public ServerCertificate UseServerCertificate() => ServerCertificate.Use(this);
 
     public static Identity Generate(string name)
     {
@@ -44,6 +45,81 @@ public sealed class Identity
     internal static string FingerprintOf(X509Certificate c) => Convert.ToHexStringLower(SHA256.HashData(c.GetRawCertData()));
 }
 
+/// <summary>
+/// Schannel cannot use ephemeral keys, so while serving, the key lives in a key container on disk. It has a fixed name per
+/// identity: after a crash the next use takes it over, and nothing accumulates.
+/// </summary>
+public sealed class ServerCertificate : IDisposable
+{
+    private static readonly Dictionary<string, (X509Certificate2 Certificate, CngKey? Key, int Users)> Used = [];
+    private readonly string _fingerprint;
+    private int _open = 1;
+
+    private ServerCertificate(string fingerprint, X509Certificate2 certificate) => (_fingerprint, Certificate) = (fingerprint, certificate);
+
+    public X509Certificate2 Certificate { get; }
+
+    internal static ServerCertificate Use(Identity id)
+    {
+        lock (Used)
+        {
+            if (!Used.TryGetValue(id.Fingerprint, out var u))
+            {
+                using var bare = X509Certificate2.CreateFromPem(id.CertPem);
+                using var key = ECDsa.Create();
+                key.ImportFromPem(id.KeyPem);
+                if (OperatingSystem.IsWindows())
+                {
+                    var stored = Store(key, "Share-" + id.Fingerprint);
+                    using var cng = new ECDsaCng(stored);
+                    u = (bare.CopyWithPrivateKey(cng), stored, 0);
+                }
+                else
+                {
+                    u = (bare.CopyWithPrivateKey(key), null, 0);
+                }
+            }
+            Used[id.Fingerprint] = u with { Users = u.Users + 1 };
+            return new ServerCertificate(id.Fingerprint, u.Certificate);
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static CngKey Store(ECDsa key, string name)
+    {
+        var p = key.ExportParameters(true);
+        byte[] blob = [0x45, 0x43, 0x53, 0x32, 32, 0, 0, 0, .. p.Q.X!, .. p.Q.Y!, .. p.D!]; // BCRYPT_ECCKEY_BLOB for a private P-256 key
+        var how = new CngKeyCreationParameters { KeyCreationOptions = CngKeyCreationOptions.OverwriteExistingKey, ExportPolicy = CngExportPolicies.None };
+        how.Parameters.Add(new CngProperty(CngKeyBlobFormat.EccPrivateBlob.Format, blob, CngPropertyOptions.None));
+        return CngKey.Create(CngAlgorithm.ECDsaP256, name, how);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _open, 0) == 0) return;
+        lock (Used)
+        {
+            var u = Used[_fingerprint];
+            if (u.Users > 1)
+            {
+                Used[_fingerprint] = u with { Users = u.Users - 1 };
+                return;
+            }
+            Used.Remove(_fingerprint);
+            u.Certificate.Dispose();
+            if (!OperatingSystem.IsWindows() || u.Key is null) return;
+            try
+            {
+                u.Key.Delete();
+            }
+            catch (CryptographicException)
+            {
+                u.Key.Dispose(); // the next use takes it over
+            }
+        }
+    }
+}
+
 public static class Pinning
 {
     /// <summary>Accepts only a peer whose leaf certificate has exactly this fingerprint; host name and chain are irrelevant.</summary>
@@ -58,9 +134,9 @@ public static class Pinning
         },
     };
 
-    internal static SslServerAuthenticationOptions ServerOptions(Identity id) => new()
+    internal static SslServerAuthenticationOptions ServerOptions(ServerCertificate c) => new()
     {
-        ServerCertificate = id.ServerCertificate,
+        ServerCertificate = c.Certificate,
         EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
         ClientCertificateRequired = false,
     };

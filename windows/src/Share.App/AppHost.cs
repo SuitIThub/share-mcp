@@ -24,6 +24,8 @@ public interface INotifier
 public interface IDesktop
 {
     void CopyText(string text);
+
+    /// <summary>Must return at once.</summary>
     void KeepAwake(bool on);
 }
 
@@ -174,8 +176,8 @@ public sealed class AppHost : IDisposable
             var busy = !_disposed && _engine?.Busy == true;
             if (busy == _awake) return;
             _awake = busy;
+            _desktop.KeepAwake(busy); // inside, so the last word is the true one
         }
-        _desktop.KeepAwake(_awake);
     }
 
     private void OnNotice(Engine e, Notice n)
@@ -200,8 +202,8 @@ public sealed class AppHost : IDisposable
                 break;
             case Notice.TextReceived t:
                 _desktop.CopyText(t.Transfer.Text);
-                if (UiVisible) Tell("In die Zwischenablage kopiert");
-                else _notifier.Text(t.Transfer, e.DeviceName(t.Transfer.SenderId));
+                if (!UiVisible) _notifier.Text(t.Transfer, e.DeviceName(t.Transfer.SenderId));
+                if (InWindow) Message?.Invoke("In die Zwischenablage kopiert", "");
                 break;
             case Notice.Unavailable u:
                 _notifier.RemoveOffer(u.Id);
@@ -218,9 +220,18 @@ public sealed class AppHost : IDisposable
         _notifier.Offer(t, e.DeviceName(t.SenderId));
     }
 
+    /// <summary>Somebody is looking at a window that shows everything itself.</summary>
     public bool UiVisible => Volatile.Read(ref _visible) > 0;
 
-    /// <summary>A window that shows offers itself is visible until disposed.</summary>
+    private volatile bool _windowOpen;
+
+    /// <summary>The window is on the screen, but maybe behind others or unattended.</summary>
+    public bool WindowOpen { get => _windowOpen; set => _windowOpen = value; }
+
+    /// <summary>Messages also go into the window if it is open, or if there is no other place for them.</summary>
+    private bool InWindow => UiVisible || WindowOpen || !_notifier.Enabled;
+
+    /// <summary>A window is being looked at until this is disposed.</summary>
     public IDisposable UiShown()
     {
         Interlocked.Increment(ref _visible);
@@ -247,8 +258,8 @@ public sealed class AppHost : IDisposable
     /// <summary>Tells the user something, wherever they are.</summary>
     public void Tell(string title, string text = "")
     {
-        if (UiVisible) Message?.Invoke(title, text);
-        else _notifier.Message(title, text);
+        if (!UiVisible) _notifier.Message(title, text);
+        if (InWindow) Message?.Invoke(title, text);
     }
 
     public void CopyText(string text) => _desktop.CopyText(text);
@@ -272,23 +283,24 @@ public sealed class AppHost : IDisposable
 
     public void TellError(Exception ex)
     {
+        if (ex is OperationCanceledException) return;
+        var (title, text) = Describe(ex);
+        Tell(title, text);
+    }
+
+    public static (string Title, string Text) Describe(Exception ex)
+    {
         switch (ex)
         {
-            case OperationCanceledException:
-                break;
             case SourceException:
-                Tell(ex.Message);
-                break;
+                return (ex.Message, "");
             case ApiException:
-                Tell("Server lehnt ab", ex.Message);
-                break;
+                return ("Server lehnt ab", ex.Message);
             case IOException:
-                Tell("Keine Verbindung zum Server");
-                break;
+                return ("Keine Verbindung zum Server", "");
             default:
                 Trace.TraceError(ex.ToString());
-                Tell("Unerwarteter Fehler", ex.Message);
-                break;
+                return ("Unerwarteter Fehler", ex.Message);
         }
     }
 

@@ -210,10 +210,10 @@ public sealed class MainModel : Observable
 
 public static class Sending
 {
-    public static Task TextAsync(Engine e, string text, IReadOnlyList<string> targets, bool all)
+    public static Task<Transfer> TextAsync(Engine e, string text, IReadOnlyList<string> targets, bool all, CancellationToken ct = default)
     {
         var kind = Format.KindOf(text);
-        return e.OfferTextAsync(kind, kind == Kind.Link ? text.Trim() : text, targets, all);
+        return e.OfferTextAsync(kind, kind == Kind.Link ? text.Trim() : text, targets, all, ct);
     }
 
     /// <summary>Opens what can be opened; folders and unreadable files are told and left out.</summary>

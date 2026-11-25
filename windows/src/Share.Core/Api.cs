@@ -77,9 +77,16 @@ public sealed class Api(Account account) : IDisposable
         using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var req = _http.Request("POST", $"/v1/relay/{relayId}");
         req.Content = new UploadContent(length, open, idle);
-        using var resp = await Http.Guard(() => _http.Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, idle.Token), ct).ConfigureAwait(false);
-        await Http.CheckAsync(resp, ct).ConfigureAwait(false);
+        await Http.Guard(async () =>
+        {
+            using var resp = await _http.Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, idle.Token).ConfigureAwait(false);
+            await Http.CheckAsync(resp, idle.Token).ConfigureAwait(false);
+            return 0;
+        }, ct).ConfigureAwait(false);
     }
+
+    /// <summary>Later calls use new connections; running ones are left alone.</summary>
+    public void RenewConnections() => _http.Renew();
 
     internal Uri EventsUri => new("ws" + Account.ServerUrl["http".Length..] + "/v1/events");
 
@@ -126,7 +133,14 @@ internal sealed class Http(string baseUrl, string? token) : IDisposable
 {
     private static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(30);
 
-    public HttpClient Client { get; } = new(new SocketsHttpHandler
+    private volatile HttpClient _client = NewClient();
+
+    public HttpClient Client => _client;
+
+    /// <summary>The old client may still be in use; its idle connections close by themselves.</summary>
+    public void Renew() => _client = NewClient();
+
+    private static HttpClient NewClient() => new(new SocketsHttpHandler
     {
         ConnectTimeout = TimeSpan.FromSeconds(10),
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
@@ -189,7 +203,11 @@ internal sealed class Http(string baseUrl, string? token) : IDisposable
         var resp = await Guard(() => client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token), ct).ConfigureAwait(false);
         try
         {
-            await CheckAsync(resp, cts.Token).ConfigureAwait(false);
+            await Guard(async () =>
+            {
+                await CheckAsync(resp, cts.Token).ConfigureAwait(false);
+                return 0;
+            }, ct).ConfigureAwait(false);
             var length = resp.Content.Headers.ContentLength;
             var ok = resp.StatusCode == (offset > 0 ? HttpStatusCode.PartialContent : HttpStatusCode.OK) && length == size - offset
                 && (offset == 0 || resp.Content.Headers.ContentRange?.From == offset);

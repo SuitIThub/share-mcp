@@ -19,17 +19,20 @@ public sealed class Sender : IDisposable
     private readonly Dictionary<string, Own> _own = [];
     private readonly List<ServerEvent> _early = []; // events for offers whose create call has not returned yet
     private ImmutableDictionary<string, Transfer> _offers = ImmutableDictionary<string, Transfer>.Empty;
+    private readonly EventOptions _retry;
+    private int _connection; // counts connections and disconnections
     private int _pending;
     private int _pendingFiles;
 
     private sealed record Own(Offer Offer, CancellationTokenSource Relays);
 
     /// <param name="onEnded">An offer ended other than by our own cancelling; gets its last known state.</param>
-    public Sender(Api api, int port = Limits.DefaultPort, Func<int, IReadOnlyList<string>>? candidates = null, Action<Transfer>? onEnded = null)
+    public Sender(Api api, int port = Limits.DefaultPort, Func<int, IReadOnlyList<string>>? candidates = null, Action<Transfer>? onEnded = null, EventOptions? retry = null)
     {
         _api = api;
         _candidates = candidates ?? LanAddresses.Candidates;
         _onEnded = onEnded;
+        _retry = retry ?? new();
         _endpoint = new LocalEndpoint(api.Account.Identity, port, LookupAsync);
     }
 
@@ -38,7 +41,8 @@ public sealed class Sender : IDisposable
 
     public event Action? Changed;
 
-    public async Task<Transfer> OfferFilesAsync(IReadOnlyList<IFileSource> sources, IReadOnlyList<string> targets, bool broadcast, string message = "", int minutes = 10, CancellationToken ct = default)
+    /// <param name="keepOnFailure">The sources stay usable if no offer comes about; otherwise they are released.</param>
+    public async Task<Transfer> OfferFilesAsync(IReadOnlyList<IFileSource> sources, IReadOnlyList<string> targets, bool broadcast, string message = "", int minutes = 10, bool keepOnFailure = false, CancellationToken ct = default)
     {
         var registered = false;
         try
@@ -67,7 +71,7 @@ public sealed class Sender : IDisposable
         }
         finally
         {
-            if (!registered)
+            if (!registered && !keepOnFailure)
                 foreach (var s in sources)
                     s.Release();
         }
@@ -107,7 +111,7 @@ public sealed class Sender : IDisposable
         catch (Exception e) when (e is OperationCanceledException or IOException and not ApiException)
         {
             // the server may have created the offer although we never got the answer
-            _ = ResyncAsync();
+            Resync(Volatile.Read(ref _connection));
             throw;
         }
         finally
@@ -166,7 +170,10 @@ public sealed class Sender : IDisposable
         switch (e)
         {
             case ServerEvent.Connected:
-                _ = ResyncAsync();
+                Resync(Interlocked.Increment(ref _connection));
+                break;
+            case ServerEvent.Disconnected:
+                Interlocked.Increment(ref _connection);
                 break;
             case ServerEvent.Relay r:
                 _ = ServeRelayAsync(r.Request);
@@ -206,38 +213,34 @@ public sealed class Sender : IDisposable
         else Changed?.Invoke();
     }
 
+    /// <summary>Repeated until it succeeds; after the next connect or disconnect somebody else takes care of it.</summary>
+    private void Resync(int connection) => _ = _retry.RepeatAsync(ResyncAsync, () => connection == Volatile.Read(ref _connection), _closed.Token);
+
     /// <summary>Recovers what happened while disconnected.</summary>
     private async Task ResyncAsync()
     {
+        await _creating.WaitAsync(_closed.Token).ConfigureAwait(false);
         try
         {
-            await _creating.WaitAsync(_closed.Token).ConfigureAwait(false);
-            try
+            string[] known;
+            lock (_lock) known = [.. _own.Keys];
+            var open = (await _api.OutgoingAsync(_closed.Token).ConfigureAwait(false)).ToDictionary(t => t.Id);
+            foreach (var id in known)
             {
-                string[] known;
-                lock (_lock) known = [.. _own.Keys];
-                var open = (await _api.OutgoingAsync(_closed.Token).ConfigureAwait(false)).ToDictionary(t => t.Id);
-                foreach (var id in known)
-                {
-                    if (open.TryGetValue(id, out var t)) Refresh(t);
-                    else Ended(id);
-                }
-                foreach (var t in open.Values.Where(t => !known.Contains(t.Id)))
-                {
-                    if (t.Kind == Kind.Files) await CancelOrphanAsync(t.Id).ConfigureAwait(false);
-                    else Adopt(t);
-                }
+                if (open.TryGetValue(id, out var t)) Refresh(t);
+                else Ended(id);
             }
-            finally
+            foreach (var t in open.Values.Where(t => !known.Contains(t.Id)))
             {
-                _creating.Release();
+                if (t.Kind == Kind.Files) await CancelOrphanAsync(t.Id).ConfigureAwait(false);
+                else Adopt(t);
             }
-            Changed?.Invoke();
         }
-        catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException)
+        finally
         {
-            // connection lost again; the next Connected repeats this
+            _creating.Release();
         }
+        Changed?.Invoke();
     }
 
     private void Refresh(Transfer t)

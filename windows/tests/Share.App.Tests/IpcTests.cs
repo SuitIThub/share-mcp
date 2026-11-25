@@ -31,6 +31,14 @@ public sealed class IpcTests : IDisposable
         return i;
     }
 
+    /// <summary>Opening files on a sleeping disk takes a while; that is no reason to call the program hung.</summary>
+    [Fact]
+    public void OpeningFilesMayTakeLonger()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(10), Ipc.Patience(new Command.Show()));
+        Assert.Equal(TimeSpan.FromMinutes(1), Ipc.Patience(new Command.Send([])));
+    }
+
     [Fact]
     public void SecondInstanceForwards()
     {

@@ -124,6 +124,7 @@ public sealed class TlsEcho : IAsyncDisposable
 {
     private readonly TcpListener _l = new(IPAddress.Loopback, 0);
     private readonly Task _loop;
+    private readonly ServerCertificate _cert;
     private int _requests;
     public int Requests => _requests;
     public readonly System.Collections.Concurrent.ConcurrentBag<SslProtocols> Protocols = [];
@@ -131,6 +132,7 @@ public sealed class TlsEcho : IAsyncDisposable
 
     public TlsEcho(Identity id)
     {
+        _cert = id.UseServerCertificate();
         _l.Start();
         _loop = Task.Run(async () =>
         {
@@ -148,7 +150,7 @@ public sealed class TlsEcho : IAsyncDisposable
                 try
                 {
                     await using var tls = new SslStream(c.GetStream());
-                    await tls.AuthenticateAsServerAsync(Pinning.ServerOptions(id)).WaitAsync(TimeSpan.FromSeconds(3));
+                    await tls.AuthenticateAsServerAsync(Pinning.ServerOptions(_cert)).WaitAsync(TimeSpan.FromSeconds(3));
                     using var r = new StreamReader(tls);
                     if (await r.ReadLineAsync() is null) continue;
                     while (!string.IsNullOrEmpty(await r.ReadLineAsync())) { }
@@ -172,5 +174,6 @@ public sealed class TlsEcho : IAsyncDisposable
     {
         _l.Dispose();
         await _loop;
+        _cert.Dispose();
     }
 }

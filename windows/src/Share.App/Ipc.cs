@@ -64,6 +64,7 @@ public abstract record Command
 public sealed class Ipc : IDisposable
 {
     private const int MaxMessage = 1 << 20;
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
     private readonly string _name;
     private readonly Mutex _mutex;
     private readonly CancellationTokenSource _stop = new();
@@ -82,16 +83,20 @@ public sealed class Ipc : IDisposable
     public bool TrySend(Command c, TimeSpan? timeout = null)
     {
         if (c.ToJson() is not { } json || json.Length > MaxMessage) return false;
-        using var cts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(10));
+        var patience = timeout ?? Patience(c);
+        using var cts = new CancellationTokenSource(patience);
         try
         {
-            return Send(json, timeout ?? TimeSpan.FromSeconds(10), cts.Token);
+            return Send(json, patience < ConnectTimeout ? patience : ConnectTimeout, cts.Token);
         }
         catch (Exception e) when (e is IOException or TimeoutException or OperationCanceledException or UnauthorizedAccessException)
         {
             return false;
         }
     }
+
+    /// <summary>Opening files may have to wake up a disk or a NAS.</summary>
+    internal static TimeSpan Patience(Command c) => c is Command.Send ? TimeSpan.FromMinutes(1) : ConnectTimeout;
 
     private bool Send(byte[] json, TimeSpan timeout, CancellationToken ct)
     {

@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -24,8 +25,9 @@ public sealed partial class LocalEndpoint(Identity identity, int preferredPort, 
     private readonly object _lock = new();
     private Run? _run;
 
-    private sealed class Run(Socket listener)
+    private sealed class Run(Socket listener, ServerCertificate certificate)
     {
+        public ServerCertificate Certificate { get; } = certificate;
         public Socket Listener { get; } = listener;
 
         /// <summary>sockets and the offer they are serving ("" until authorised)</summary>
@@ -47,7 +49,16 @@ public sealed partial class LocalEndpoint(Identity identity, int preferredPort, 
         {
             if (_run is null)
             {
-                _run = new Run(Listen());
+                var listener = Listen();
+                try
+                {
+                    _run = new Run(listener, identity.UseServerCertificate());
+                }
+                catch (CryptographicException e)
+                {
+                    listener.Dispose();
+                    throw new IOException("cannot use the key", e);
+                }
                 _ = AcceptLoop(_run);
             }
             return ((IPEndPoint)_run.Listener.LocalEndPoint!).Port;
@@ -85,6 +96,7 @@ public sealed partial class LocalEndpoint(Identity identity, int preferredPort, 
         if (r is null) return;
         r.Listener.Dispose();
         foreach (var s in r.Sockets.Keys) s.Dispose();
+        r.Certificate.Dispose();
     }
 
     public void Dispose() => Stop();
@@ -142,7 +154,7 @@ public sealed partial class LocalEndpoint(Identity identity, int preferredPort, 
         {
             s.NoDelay = true;
             await using var tls = new SslStream(new NetworkStream(s, ownsSocket: false));
-            await tls.AuthenticateAsServerAsync(Pinning.ServerOptions(identity)).ConfigureAwait(false);
+            await tls.AuthenticateAsServerAsync(Pinning.ServerOptions(r.Certificate)).ConfigureAwait(false);
             var req = await ReadRequest(tls).ConfigureAwait(false);
             if (req is null) await Respond(tls, 431).ConfigureAwait(false);
             else await Handle(r, s, req, tls, deadline).ConfigureAwait(false);
@@ -150,7 +162,7 @@ public sealed partial class LocalEndpoint(Identity identity, int preferredPort, 
             await tls.ShutdownAsync().ConfigureAwait(false);
             s.Shutdown(SocketShutdown.Send);
         }
-        catch (Exception e) when (e is IOException or SocketException or ObjectDisposedException or AuthenticationException or InvalidOperationException or OperationCanceledException)
+        catch (Exception e) when (e is IOException or SocketException or ObjectDisposedException or AuthenticationException or InvalidOperationException or OperationCanceledException or CryptographicException)
         {
             // peer went away, junk, or closed by us
         }

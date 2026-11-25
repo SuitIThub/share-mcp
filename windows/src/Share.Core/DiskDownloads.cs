@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -11,6 +12,9 @@ public sealed partial class DiskDownloads(string directory, string stateFile) : 
 {
     /// <summary>guards all state files; there is one per process in practice</summary>
     private static readonly object Lock = new();
+
+    /// <summary>finished files that could not be written down</summary>
+    private readonly ConcurrentDictionary<string, string> _finished = new();
 
     private sealed record Entry(string? Part = null, string? Done = null);
 
@@ -64,10 +68,11 @@ public sealed partial class DiskDownloads(string directory, string stateFile) : 
     {
         try
         {
-            var all = JsonSerializer.Deserialize<Dictionary<string, Entry>>(File.ReadAllBytes(stateFile)) ?? [];
+            // not being able to read it is not the same as there being nothing: the next Save would lose everything
+            var all = JsonSerializer.Deserialize<Dictionary<string, Entry>>(Patiently(() => File.ReadAllBytes(stateFile))) ?? [];
             return all.Where(e => e.Value is not null && e.Key.Contains('-')).ToDictionary(e => e.Key, e => e.Value);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException or JsonException)
         {
             return [];
         }
@@ -77,8 +82,30 @@ public sealed partial class DiskDownloads(string directory, string stateFile) : 
     {
         Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
         var tmp = stateFile + ".tmp";
-        File.WriteAllBytes(tmp, JsonSerializer.SerializeToUtf8Bytes(state));
-        File.Move(tmp, stateFile, true);
+        var json = JsonSerializer.SerializeToUtf8Bytes(state);
+        Patiently(() =>
+        {
+            File.WriteAllBytes(tmp, json);
+            File.Move(tmp, stateFile, true);
+            return 0;
+        });
+    }
+
+    /// <summary>Virus scanners, backups and indexers open files for a moment.</summary>
+    private static T Patiently<T>(Func<T> f)
+    {
+        for (var i = 0; ; i++)
+        {
+            try
+            {
+                return f();
+            }
+            catch (Exception e) when (e is UnauthorizedAccessException || (e is IOException && (e.HResult & 0xFFFF) is 32 or 33))
+            {
+                if (i == 10) throw new StorageBusyException(e.Message, e);
+                Thread.Sleep(50);
+            }
+        }
     }
 
     private Entry? Get(string key)
@@ -111,7 +138,7 @@ public sealed partial class DiskDownloads(string directory, string stateFile) : 
 
     private sealed class DiskPart(DiskDownloads store, string key, string name, string part) : IPart
     {
-        public string? FinishedRef => store.Get(key)?.Done is { } done && File.Exists(done) ? done : null;
+        public string? FinishedRef => (store._finished.GetValueOrDefault(key) ?? store.Get(key)?.Done) is { } done && File.Exists(done) ? done : null;
 
         public long Size()
         {
@@ -164,7 +191,14 @@ public sealed partial class DiskDownloads(string directory, string stateFile) : 
                 {
                     throw new StorageBusyException($"cannot finish {name}", e); // e.g. a virus scanner looking at it
                 }
-                store.Set(key, new Entry(Done: target));
+                try
+                {
+                    store.Set(key, new Entry(Done: target));
+                }
+                catch (IOException)
+                {
+                    store._finished[key] = target;
+                }
                 return target;
             }
         });

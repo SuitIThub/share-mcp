@@ -37,12 +37,12 @@ public sealed class Receiver(Api api, IDownloadStore store, ReceiverOptions? opt
             using var run = new Run(this, t, accepted, onProgress);
             var refs = await run.AllAsync(ct).ConfigureAwait(false);
             // without the server's answer the finished markers stay, so a later call only reports
-            if (await run.Reporter.DeliveredAsync(ct).ConfigureAwait(false)) _store.Forget(t.Id);
+            if (await run.Reporter.DeliveredAsync(ct).ConfigureAwait(false)) Forget(t.Id);
             return refs;
         }
         catch (OfferEndedException)
         {
-            _store.Forget(t.Id);
+            Forget(t.Id);
             throw;
         }
         catch (FatalException e)
@@ -56,14 +56,27 @@ public sealed class Receiver(Api api, IDownloadStore store, ReceiverOptions? opt
     public async Task AbortAsync(string id)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Forget(id);
         try
         {
-            _store.Forget(id);
             await _api.FailAsync(id, cts.Token).ConfigureAwait(false);
         }
         catch (Exception e) when (e is IOException or OperationCanceledException or UnauthorizedAccessException)
         {
             // the server notices by itself
+        }
+    }
+
+    /// <summary>Only housekeeping; what is left over goes with the next clean-up.</summary>
+    private void Forget(string id)
+    {
+        try
+        {
+            _store.Forget(id);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning("cannot forget a download: " + e.Message);
         }
     }
 

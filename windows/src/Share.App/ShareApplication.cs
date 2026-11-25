@@ -42,12 +42,13 @@ public sealed class ShareApplication : Application
         _host.StateChanged += () => Dispatcher.InvokeAsync(UpdateTray);
         UpdateTray();
         _main = new MainWindow(_host, new MainModel(_host, a => Dispatcher.InvokeAsync(a), _results));
-        _main.Model.PayloadOffered += async p => await OfferAsync(p);
+        _main.Model.PayloadOffered += p => Present(SendModel.Open(_host, a => Dispatcher.InvokeAsync(a), p, _main.Model.Targets.SelectedIds, _main.Model.Targets.All));
         _main.SettingsWanted += Settings;
         _main.PairingWanted += () => Pair(null);
         _main.Hidden += OnHidden;
         _ipc.Listen(c => Dispatcher.InvokeAsync(() => HandleAsync(c)).Task.Unwrap());
         SystemEvents.PowerModeChanged += OnPower;
+        SystemEvents.SessionSwitch += OnSession;
         NetworkChange.NetworkAvailabilityChanged += OnNetwork;
         if (_args.Command is not null) Handle(_args.Command);
         if (_share is not null) _ = Task.Run(() => ShareTarget.HandleAsync(new WindowsShareData(_share.ShareOperation), _host.TempDir, async c =>
@@ -72,6 +73,13 @@ public sealed class ShareApplication : Application
     private void OnPower(object sender, PowerModeChangedEventArgs e)
     {
         if (e.Mode == PowerModes.Resume) _host.Engine?.Reconnect();
+    }
+
+    private void OnSession(object sender, SessionSwitchEventArgs e)
+    {
+        var away = e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect;
+        var back = e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect;
+        if (away || back) Dispatcher.InvokeAsync(() => _main.Locked = away);
     }
 
     private void OnNetwork(object? sender, NetworkAvailabilityEventArgs e)
@@ -120,11 +128,15 @@ public sealed class ShareApplication : Application
 
     private async void Handle(Command c) => await HandleAsync(c);
 
-    /// <summary>Asks for targets; every payload gets its own window. Completes once all files are open.</summary>
-    private async Task OfferAsync(Payload p)
+    /// <summary>
+    /// Something from outside. Completes once all files are open. Nothing is selected, whatever is ticked in the main window:
+    /// the new window takes the focus, and a stray Enter must not send.
+    /// </summary>
+    private async Task OfferAsync(Payload p) => Present(await SendModel.OpenAsync(_host, a => Dispatcher.InvokeAsync(a), p, [], false));
+
+    /// <summary>Asks for targets; every payload gets its own window.</summary>
+    private void Present(SendModel m)
     {
-        var picked = _main.IsVisible ? _main.Model.Targets : new TargetList();
-        var m = await SendModel.OpenAsync(_host, a => Dispatcher.InvokeAsync(a), p, picked.SelectedIds, picked.All);
         var w = new SendWindow(m);
         w.PairingWanted += () => Pair(null);
         w.Show();
@@ -180,6 +192,7 @@ public sealed class ShareApplication : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        SystemEvents.SessionSwitch -= OnSession;
         SystemEvents.PowerModeChanged -= OnPower; // static events would keep us alive
         NetworkChange.NetworkAvailabilityChanged -= OnNetwork;
         _tray.Dispose();

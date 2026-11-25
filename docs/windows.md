@@ -43,7 +43,7 @@ pwsh packaging/build.ps1 -Loose; dotnet test tests/Share.Ui.Tests   # bedient da
 ## Verhalten
 
 - Dateien landen im Download-Ordner. „Öffnen“ startet nie Programme oder Skripte, sondern zeigt sie im Ordner.
-- Angebotene Dateien bleiben für andere Programme benutzbar. Wird eine Datei ersetzt, wird weiter die alte Fassung gesendet; wird sie verändert, bricht die Sendung ab.
+- Angebotene Dateien bleiben für andere Programme benutzbar. Wird eine Datei ersetzt, wird weiter die alte Fassung gesendet; wird sie verändert, bricht die Sendung ab. Nur Programme, die eine Datei ganz für sich allein öffnen wollen, müssen das Ende des Angebots abwarten.
 - Solange übertragen wird, geht der PC nicht von selbst in den Ruhezustand.
 - Protokoll zur Fehlersuche: `%LOCALAPPDATA%\Packages\SuitIThub.Share_…\LocalCache\Local\Share\share.log` (ohne Inhalte und Schlüssel).
 
@@ -52,6 +52,7 @@ pwsh packaging/build.ps1 -Loose; dotnet test tests/Share.Ui.Tests   # bedient da
 - [ ] Teilen-Menü: Datei aus dem Explorer, Bild aus Fotos, Link aus Edge → „Share“
 - [ ] Explorer: Rechtsklick → „Senden an“ → „Share“ (mehrere Dateien)
 - [ ] Benachrichtigung mit „Annehmen“ bei verstecktem Fenster, auch bei beendetem Programm
+- [ ] Benachrichtigung bei gesperrtem Bildschirm und wenn das offene Fenster hinter einem anderen liegt
 - [ ] PC neu starten: Share ist im Infobereich und verbunden
 - [ ] Handy lädt vom PC **lokal** (Firewall), PC lädt vom Handy lokal
 - [ ] 5-GB-Datei in beide Richtungen

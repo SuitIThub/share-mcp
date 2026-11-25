@@ -51,8 +51,8 @@ public sealed class SendModelTests
         Assert.True(m.CanSend);
         var closed = false;
         m.Closed += () => closed = true;
-        m.Send();
-        Assert.True(closed);
+        _ = m.Send();
+        await Until(r, () => closed, "closed");
         await r.Until(() => r.Peer.State.Incoming.Count == 1, "offered");
         await r.Peer.AcceptAsync(r.Peer.State.Incoming[0].Id);
         await r.Until(() => r.Peer.State.Downloads.Count == 1 && r.Peer.State.Downloads[0].Phase == Phase.Done, "received");
@@ -87,7 +87,7 @@ public sealed class SendModelTests
         Assert.Equal("Zu lang (höchstens 64 KB)", m.Problem);
         m.Text = "https://example.org";
         Assert.True(m.CanSend);
-        m.Send();
+        _ = m.Send();
         await r.Until(() => r.Peer.State.Incoming.Any(t => t.Kind == Kind.Link && t.Broadcast), "offered");
     }
 
@@ -103,7 +103,7 @@ public sealed class SendModelTests
         r.Host.SetAccount(await r.Go.AccountAsync("PC"));
         await Until(r, () => m.Targets.Rows.Count == 1 && !m.NeedsPairing, "devices after pairing");
         m.Targets.All = true;
-        m.Send();
+        _ = m.Send();
         await r.Until(() => r.Peer.State.Incoming.Count == 1, "offered");
     }
 
@@ -161,7 +161,7 @@ public sealed class SendModelTests
         await using var r = await new HostRig().Start();
         var temp = Temp(r, "temp.png");
         var m = await Open(r, new Payload.Files([temp]), all: true);
-        m.Send();
+        _ = m.Send();
         await r.Until(() => r.Engine.State.Outgoing.Count == 1, "offered");
         Assert.True(File.Exists(temp));
         await r.Engine.CancelOutgoingAsync(r.Engine.State.Outgoing[0].Id);
@@ -169,15 +169,87 @@ public sealed class SendModelTests
     }
 
     [Fact]
-    public async Task FailedSendIsToldAndReleased()
+    public async Task FailedSendKeepsFilesAndWindow()
+    {
+        await using var r = await new HostRig().Start();
+        var temp = Temp(r, "temp.png");
+        var m = await Open(r, new Payload.Files([temp]), all: true);
+        var closed = false;
+        m.Closed += () => closed = true;
+        r.Go.Stop();
+        var sending = m.Send();
+        Assert.True(m.IsSending);
+        Assert.False(m.CanSend);
+        await sending;
+        await Until(r, () => !m.IsSending, "failed");
+        Assert.Equal("Keine Verbindung zum Server", m.Problem);
+        Assert.False(closed);
+        Assert.True(File.Exists(temp));
+        Assert.True(m.CanSend);
+        r.Go.Restart();
+        await r.Until(() => r.Engine.State.Connected && r.Peer.State.Connected, "back");
+        _ = m.Send();
+        Assert.Equal("", m.Problem);
+        await Until(r, () => closed, "closed");
+        await r.Until(() => r.Peer.State.Incoming.Count == 1, "offered");
+        await r.Peer.AcceptAsync(r.Peer.State.Incoming[0].Id);
+        await r.Until(() => r.Peer.State.Downloads is [{ Phase: Phase.Done }], "received");
+    }
+
+    [Fact]
+    public async Task FailedSendKeepsTheText()
+    {
+        await using var r = await new HostRig().Start();
+        var m = await Open(r, new Payload.Text("langer Text"), all: true);
+        r.Go.Stop();
+        await m.Send();
+        await Until(r, () => !m.IsSending, "failed");
+        Assert.Equal("langer Text", m.Text);
+        Assert.Equal("Keine Verbindung zum Server", m.Problem);
+        Assert.True(m.CanSend);
+        m.Cancel();
+    }
+
+    [Fact]
+    public async Task CancelAfterAFailureReleases()
     {
         await using var r = await new HostRig().Start();
         var temp = Temp(r, "temp.png");
         var m = await Open(r, new Payload.Files([temp]), all: true);
         r.Go.Stop();
-        m.Send();
-        await r.Until(() => r.Notifier.Has("message Keine Verbindung zum Server"), "told");
+        await m.Send();
+        await Until(r, () => !m.IsSending, "failed");
+        m.Cancel();
         Assert.False(File.Exists(temp));
+    }
+
+    [Fact]
+    public async Task CancelWhileSendingLeavesNothingBehind()
+    {
+        await using var r = await new HostRig().Start();
+        for (var i = 0; i < 5; i++) // whichever side wins the race
+        {
+            var temp = Temp(r, $"temp{i}.png");
+            var m = await Open(r, new Payload.Files([temp]), all: true);
+            var sending = m.Send();
+            await Task.Delay(i * 2);
+            m.Cancel();
+            await sending;
+            await Until(r, () => !File.Exists(temp), "released");
+        }
+        await r.Until(() => r.Engine.State.Outgoing.Count == 0 && r.Peer.State.Incoming.Count == 0, "withdrawn");
+    }
+
+    /// <summary>A program that deletes its files as soon as the drop has returned.</summary>
+    [Fact]
+    public async Task DroppedFilesAreOpenWhenTheDropReturns()
+    {
+        await using var r = await new HostRig().Start();
+        var p = r.File("gezogen.bin", 100);
+        var m = SendModel.Open(r.Host, _ui.Enqueue, new Payload.Files([p]), [], false);
+        File.Delete(p);
+        Assert.Equal("gezogen.bin (100 B) senden", m.Title);
+        m.Cancel();
     }
 
     [Fact]

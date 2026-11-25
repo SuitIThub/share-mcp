@@ -87,6 +87,7 @@ public sealed class Engine : IDisposable
     private readonly HashSet<string> _aborted = []; // downloads the user cancelled; never resumed
     private readonly HashSet<string> _completed = []; // downloads that are complete here, whatever the server thinks
     private EngineState _state = new();
+    private int _connection; // counts connections, so an old one stops repeating
     private bool _started;
     private bool _disposed;
 
@@ -95,7 +96,7 @@ public sealed class Engine : IDisposable
         Api = api;
         _store = store;
         _o = options ?? new();
-        _sender = new Sender(api, _o.Port, _o.Candidates, t => _ = OfferEndedAsync(t));
+        _sender = new Sender(api, _o.Port, _o.Candidates, t => _ = OfferEndedAsync(t), _o.Events);
         _sender.Changed += () => Update(s => s with { Outgoing = [.. _sender.Offers.Values.OrderBy(t => t.CreatedAt)] });
         _receiver = new Receiver(api, store, _o.Receiver);
     }
@@ -132,7 +133,11 @@ public sealed class Engine : IDisposable
     }
 
     /// <summary>Reconnects without waiting, e.g. after waking up.</summary>
-    public void Reconnect() => _o.Events.Reconnect();
+    public void Reconnect()
+    {
+        Api.RenewConnections(); // pooled ones may be dead without anybody having noticed
+        _o.Events.Reconnect();
+    }
 
     private async Task Every(TimeSpan interval, Func<Task> f)
     {
@@ -171,7 +176,8 @@ public sealed class Engine : IDisposable
         {
             case ServerEvent.Connected:
                 Update(s => s with { Connected = true, Unauthorised = false });
-                _ = Quietly(RefreshAsync);
+                var connection = Interlocked.Increment(ref _connection);
+                _ = _o.Events.RepeatAsync(RefreshAsync, () => State.Connected && connection == Volatile.Read(ref _connection), _stop.Token);
                 break;
             case ServerEvent.Disconnected:
                 Update(s => s with { Connected = false });
@@ -357,10 +363,10 @@ public sealed class Engine : IDisposable
         return own?.Status == Status.Waiting && !t.Closed && t.ExpiresAt > _o.Now() ? t : null;
     }
 
-    public Task<Transfer> OfferFilesAsync(IReadOnlyList<IFileSource> sources, IReadOnlyList<string> targets, bool broadcast, string message = "", int minutes = 10) =>
-        _sender.OfferFilesAsync(sources, targets, broadcast, message, minutes);
+    public Task<Transfer> OfferFilesAsync(IReadOnlyList<IFileSource> sources, IReadOnlyList<string> targets, bool broadcast, string message = "", int minutes = 10, bool keepOnFailure = false, CancellationToken ct = default) =>
+        _sender.OfferFilesAsync(sources, targets, broadcast, message, minutes, keepOnFailure, ct);
 
-    public Task<Transfer> OfferTextAsync(Kind kind, string text, IReadOnlyList<string> targets, bool broadcast) => _sender.OfferTextAsync(kind, text, targets, broadcast);
+    public Task<Transfer> OfferTextAsync(Kind kind, string text, IReadOnlyList<string> targets, bool broadcast, CancellationToken ct = default) => _sender.OfferTextAsync(kind, text, targets, broadcast, ct);
 
     public Task CancelOutgoingAsync(string id) => _sender.CancelAsync(id);
 
@@ -466,7 +472,7 @@ public sealed class Engine : IDisposable
             lock (_lock) _completed.Add(t.Id);
             Done(t.Id, d => d with { Phase = Phase.Done, Bytes = t.TotalSize, Refs = refs }, d => new Notice.DownloadDone(d));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             lock (_lock) _jobs.Remove(t.Id);
         }

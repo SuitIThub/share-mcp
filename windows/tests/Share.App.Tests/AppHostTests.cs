@@ -20,7 +20,13 @@ public sealed class FakeDesktop : IDesktop
     public readonly ConcurrentQueue<string> Copied = new();
     public volatile bool Awake;
     public void CopyText(string text) => Copied.Enqueue(text);
-    public void KeepAwake(bool on) => Awake = on;
+    public Action<bool>? Waking;
+
+    public void KeepAwake(bool on)
+    {
+        Waking?.Invoke(on);
+        Awake = on;
+    }
 }
 
 /// <summary>The program without windows, against a real server, plus a second device.</summary>
@@ -193,6 +199,54 @@ public sealed class AppHostTests
         Assert.False(r.Notifier.Has("message"));
         r.Host.Tell("Hallo");
         Assert.True(r.Notifier.Has("message Hallo|"));
+    }
+
+    /// <summary>A window behind another one is no reason to keep quiet.</summary>
+    [Fact]
+    public async Task UnattendedWindowGetsNotificationsToo()
+    {
+        await using var r = await new HostRig().Start();
+        var got = new ConcurrentQueue<string>();
+        r.Host.Message += (a, b) => got.Enqueue(a + "|" + b);
+        r.Host.WindowOpen = true;
+        var t = await r.Peer.OfferTextAsync(Kind.Text, "hallo", ["PC"], false);
+        await r.Until(() => r.Notifier.Has("offer " + t.Id), "announced");
+        r.Host.Run(e => e.AcceptAsync(t.Id));
+        await r.Until(() => r.Notifier.Has("text hallo") && got.Contains("In die Zwischenablage kopiert|"), "both");
+        r.Host.Tell("Hallo");
+        Assert.True(r.Notifier.Has("message Hallo|"));
+        Assert.Contains("Hallo|", got);
+    }
+
+    /// <summary>Without notifications the message has to wait in the window.</summary>
+    [Fact]
+    public async Task MessagesAreNotLostWithoutNotifications()
+    {
+        await using var r = await new HostRig().Start();
+        r.Notifier.Enabled = false;
+        var got = new ConcurrentQueue<string>();
+        r.Host.Message += (a, b) => got.Enqueue(a + "|" + b);
+        r.Host.Tell("Hallo");
+        Assert.Equal(["Hallo|"], got);
+    }
+
+    /// <summary>The last word on sleeping must be the true one.</summary>
+    [Fact]
+    public async Task RacingSleepUpdatesKeepTheirOrder()
+    {
+        await using var r = await new HostRig().Start();
+        var entered = new TaskCompletionSource();
+        r.Desktop.Waking = on =>
+        {
+            if (!on) return;
+            entered.TrySetResult();
+            Thread.Sleep(400); // the other update overtakes
+        };
+        var offering = Task.Run(() => r.Engine.OfferFilesAsync([DiskFile.Open(r.File("a", 10))], ["Peer"], false));
+        await entered.Task;
+        await Task.Run(() => r.Host.SetAccount(null));
+        await offering;
+        Assert.False(r.Desktop.Awake);
     }
 
     [Fact]

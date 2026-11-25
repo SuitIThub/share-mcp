@@ -21,8 +21,10 @@ public partial class MainWindow : Window
         _tick.Tick += (_, _) => model.Refresh();
         IsVisibleChanged += (_, _) => UpdateShown();
         StateChanged += (_, _) => UpdateShown();
+        Activated += (_, _) => UpdateShown();
+        Deactivated += (_, _) => UpdateShown();
         DragOver += OnDragOver;
-        Drop += (_, e) => Model.Paste(e.Data);
+        Drop += (_, e) => Model.Paste(e.Data); // files are open before this returns; the source may then delete them
     }
 
     public MainModel Model { get; }
@@ -35,20 +37,40 @@ public partial class MainWindow : Window
     /// <summary>Set before the program really ends.</summary>
     public bool ReallyClose { get; set; }
 
-    /// <summary>While it can be seen, the window itself shows what happens; otherwise notifications do.</summary>
+    private bool _locked;
+
+    /// <summary>Nobody sees the window of a locked computer.</summary>
+    public bool Locked
+    {
+        get => _locked;
+        set
+        {
+            _locked = value;
+            UpdateShown();
+        }
+    }
+
+    internal static bool Attended(bool open, bool active, bool locked) => open && active && !locked;
+
+    /// <summary>While it is being looked at, the window itself shows what happens; otherwise notifications do.</summary>
     private void UpdateShown()
     {
-        var visible = IsVisible && WindowState != WindowState.Minimized;
-        if (visible == (_shown is not null)) return;
-        if (visible)
+        var open = IsVisible && WindowState != WindowState.Minimized;
+        _host.WindowOpen = open;
+        if (open && !_tick.IsEnabled)
         {
-            _shown = _host.UiShown();
             Model.Refresh();
             _tick.Start();
         }
+        if (!open) _tick.Stop();
+        var attended = Attended(open, IsActive, Locked);
+        if (attended == (_shown is not null)) return;
+        if (attended)
+        {
+            _shown = _host.UiShown();
+        }
         else
         {
-            _tick.Stop();
             _shown?.Dispose();
             _shown = null;
         }

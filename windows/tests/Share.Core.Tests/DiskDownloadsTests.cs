@@ -205,4 +205,48 @@ public sealed class DiskDownloadsTests : IDisposable
 
     [Fact]
     public void DownloadsFolderIsTheUsersOwn() => Assert.True(Directory.Exists(DiskDownloads.DefaultDirectory));
+
+    /// <summary>A virus scanner, backup or indexer may have the state file open at any moment.</summary>
+    [Fact]
+    public void BusyStateFileIsOnlyBusyAndLosesNothing()
+    {
+        var item = new FileItem("a.bin", 10);
+        using (var s = Store().Part("t1", 0, item).Append(0)) s.Write(new byte[5]);
+        Assert.Throws<StorageBusyException>(() =>
+        {
+            using (new FileStream(_tmp.File("state.json"), FileMode.Open, FileAccess.Read, FileShare.Read)) Store().Part("t2", 0, item).Append(0).Dispose();
+        });
+        Assert.Throws<StorageBusyException>(() =>
+        {
+            using (new FileStream(_tmp.File("state.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) Store().Part("t2", 0, item).Append(0).Dispose();
+        });
+        Assert.Equal(5, Store().Part("t1", 0, item).Size());
+        Store().Forget("t1"); // still knows the part
+        Assert.DoesNotContain(Files(), f => f.Contains("t1"));
+    }
+
+    [Fact]
+    public async Task BrieflyBusyStateFileIsWaitedFor()
+    {
+        var item = new FileItem("a.bin", 10);
+        using (Store().Part("t1", 0, item).Append(0)) { }
+        var open = new FileStream(_tmp.File("state.json"), FileMode.Open, FileAccess.Read, FileShare.None);
+        var closing = Task.Delay(150).ContinueWith(_ => open.Dispose());
+        using (Store().Part("t2", 0, item).Append(0)) { }
+        await closing;
+    }
+
+    /// <summary>Once the file is in place it is finished, whether or not that can be written down.</summary>
+    [Fact]
+    public void FinishingWithBusyStateFileDoesNotDownloadAgain()
+    {
+        var item = new FileItem("a.bin", 5);
+        var store = Store();
+        var p = store.Part("t1", 0, item);
+        using (var s = p.Append(0)) s.Write(new byte[5]);
+        string done;
+        using (new FileStream(_tmp.File("state.json"), FileMode.Open, FileAccess.Read, FileShare.Read)) done = p.Finish();
+        Assert.True(File.Exists(done));
+        Assert.Equal(done, store.Part("t1", 0, item).FinishedRef);
+    }
 }
