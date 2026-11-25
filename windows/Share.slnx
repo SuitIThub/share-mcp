@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="src/Share.Core/Share.Core.csproj" />
+  <Project Path="src/Share.App/Share.App.csproj" />
   <Project Path="tests/Share.Core.Tests/Share.Core.Tests.csproj" />
+  <Project Path="tests/Share.App.Tests/Share.App.Tests.csproj" />
 </Solution>
