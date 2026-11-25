@@ -11,6 +11,7 @@ public sealed class ShareApplication : Application
     private readonly string _data;
     private AppHost _host = null!;
     private Tray _tray = null!;
+    private MainWindow _main = null!;
 
     public ShareApplication(StartArgs args, Ipc ipc, string data)
     {
@@ -32,6 +33,7 @@ public sealed class ShareApplication : Application
         _tray = new Tray(() => Handle(new Command.Show()), () => Handle(new Command.Show()), Quit);
         _host.StateChanged += () => Dispatcher.InvokeAsync(UpdateTray);
         UpdateTray();
+        _main = new MainWindow(_host, new MainModel(_host, a => Dispatcher.InvokeAsync(a), new Results(_host), Path.Combine(_data, "temp")));
         _ipc.Listen(c => Dispatcher.InvokeAsync(() => Handle(c)).Task);
         if (_args.Command is not null) Handle(_args.Command);
     }
@@ -42,11 +44,16 @@ public sealed class ShareApplication : Application
         _tray.Update(s.Incoming.Count, s.Connected);
     }
 
-    private void Handle(Command c) => Trace.TraceInformation("command " + c.GetType().Name);
+    private void Handle(Command c)
+    {
+        Trace.TraceInformation("command " + c.GetType().Name);
+        if (c is Command.Show) _main.BringUp();
+    }
 
     private void Quit()
     {
         if (_host.Engine?.Busy == true && MessageBox.Show("Es laufen noch Übertragungen. Wirklich beenden?", "Share", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        _main.ReallyClose = true;
         Shutdown();
     }
 

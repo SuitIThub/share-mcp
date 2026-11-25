@@ -221,6 +221,8 @@ public sealed class AppHost : IDisposable
         else _notifier.Message(title, text);
     }
 
+    public void CopyText(string text) => _desktop.CopyText(text);
+
     /// <summary>Runs something in the background and tells the user if it fails.</summary>
     public void Run(Func<Engine, Task> f)
     {
